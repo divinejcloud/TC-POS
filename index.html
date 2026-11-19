@@ -152,7 +152,7 @@
       <a class="navbar-brand" href="#"><i class="fa-solid fa-utensils me-2"></i><span id="brandName">POS System</span></a>
       <div class="ms-auto d-flex align-items-center gap-2 gap-md-3 text-light">
         <div id="branchSwitcherWrap" class="d-flex align-items-center gap-1"></div>
-        <span class="sync-indicator d-none d-sm-inline" id="syncStatus"><i class="fa-solid fa-arrows-rotate me-1"></i>Syncing…</span>
+        <span class="sync-indicator d-none d-sm-inline" id="syncStatus"><i class="fa-solid fa-bolt text-warning me-1"></i>Connecting Realtime…</span>
         
         <button class="btn btn-outline-warning btn-sm fw-bold" onclick="openHelpModal()">
           <i class="fa-solid fa-circle-question me-1"></i><span class="d-none d-sm-inline">Help &amp; Guide</span>
@@ -284,6 +284,10 @@
             <!-- SETTINGS TAB -->
             <div class="tab-pane fade show active" id="tabSettings">
               <div class="card card-pos p-3">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                  <span class="badge bg-dark" id="settingsBranchBadge">Current Branch Settings</span>
+                  <span class="small text-muted">Settings apply to the active branch</span>
+                </div>
                 <form onsubmit="saveSettings(event)">
                   <div class="row g-3">
                     <div class="col-md-4">
@@ -357,10 +361,13 @@
             <!-- BRANCHES TAB (MULTI-BRANCH) -->
             <div class="tab-pane fade" id="tabBranches">
               <div class="card card-pos p-3">
-                <div class="d-flex justify-content-between align-items-center mb-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
                   <h5 class="mb-0" id="cfgBranchFormTitle">Add / Edit Branch</h5>
                   <button class="btn btn-sm btn-outline-secondary" onclick="resetBranchForm()"><i class="fa-solid fa-rotate-left me-1"></i>Reset</button>
                 </div>
+                <p class="small text-muted mb-3">
+                  <i class="fa-solid fa-copy text-warning me-1"></i>Adding a new branch automatically copies Settings, Menu, and Tables from the <strong>Main Branch</strong> (Users, End-of-Day Close, and Sales Reports start fresh per branch).
+                </p>
                 <form onsubmit="saveBranch(event)" class="row g-2 mb-4">
                   <input type="hidden" id="cfgBranchId">
                   <div class="col-md-4"><input class="form-control" id="cfgBranchName" placeholder="Branch Name (e.g. Gensan Highway)" required></div>
@@ -546,16 +553,26 @@
               </div>
             </div>
 
-            <!-- SALES REPORT TAB -->
+            <!-- SALES REPORT TAB (WITH CROSS-BRANCH CONSOLIDATED OPTION FOR ADMIN) -->
             <div class="tab-pane fade" id="tabReports">
               <div class="card card-pos p-3">
-                <h5 class="mb-3">Sales Report</h5>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                  <h5 class="mb-0">Sales Report</h5>
+                  <span class="badge bg-secondary" id="reportScopeBadge">Current Branch</span>
+                </div>
                 <div class="row g-2 mb-2">
+                  <div class="col-6 col-md-3" id="reportScopeWrap">
+                    <label class="form-label small fw-semibold">Branch Scope</label>
+                    <select class="form-select" id="reportBranchScope" onchange="loadSalesReport()">
+                      <option value="CURRENT">Current Active Branch</option>
+                      <option value="ALL">All Branches (Consolidated)</option>
+                    </select>
+                  </div>
                   <div class="col-6 col-md-3"><label class="form-label small">Start Date</label><input type="date" class="form-control" id="reportStart"></div>
                   <div class="col-6 col-md-3"><label class="form-label small">End Date</label><input type="date" class="form-control" id="reportEnd"></div>
-                  <div class="col-12 col-md-6 d-flex align-items-end gap-2">
+                  <div class="col-12 col-md-3 d-flex align-items-end gap-2">
                     <button class="btn btn-primary" onclick="loadSalesReport()">Generate</button>
-                    <button class="btn btn-outline-secondary" onclick="exportSalesReportCsv()"><i class="fa-solid fa-file-csv me-1"></i>Export CSV</button>
+                    <button class="btn btn-outline-secondary" onclick="exportSalesReportCsv()"><i class="fa-solid fa-file-csv me-1"></i>CSV</button>
                   </div>
                 </div>
                 <div class="d-flex flex-wrap gap-1 mb-3">
@@ -565,8 +582,7 @@
                   <button class="btn btn-sm btn-outline-secondary" onclick="setReportRange('all')">All Time</button>
                 </div>
                 <div id="reportSummary" class="mb-3"></div>
-                <div id="reportHighlights" class="mb-3"></div>
-                <div id="reportBreakdowns"></div>
+                <div id="reportBranchComparison" class="mb-3"></div>
                 <h6 class="mt-3">Top Items</h6>
                 <div id="reportTopItems"></div>
                 <h6 class="mt-3">Daily Sales</h6>
@@ -640,16 +656,13 @@
           <div class="col-md-5">
             <h5>Basket</h5>
             <select class="form-select form-select-sm mb-2" id="cartTableSelect"></select>
-            
             <div id="cartItemsList" class="my-2" style="max-height:280px; overflow-y:auto; -webkit-overflow-scrolling: touch;"></div>
-            
             <div class="border-top pt-2">
               <div class="d-flex justify-content-between fs-5 text-danger fw-bold">
                 <span>Subtotal:</span>
                 <strong id="cartSubtotal">₱0.00</strong>
               </div>
             </div>
-            
             <button class="btn btn-warning w-100 fw-bold mt-3 py-2" onclick="submitOrder()">Submit Order</button>
           </div>
         </div>
@@ -668,18 +681,15 @@
       </div>
       <div class="modal-body">
         <input type="hidden" id="transferOrderId">
-        
         <div class="alert alert-light border mb-3">
           <div class="small text-muted">Order Number:</div>
           <strong id="transferOrderNum" class="text-primary fs-5">—</strong>
           <div class="small text-muted mt-1">Current Table: <strong id="transferCurrentTable" class="text-dark">—</strong></div>
         </div>
-
         <div class="mb-3">
           <label class="form-label fw-semibold">Select Target Table (Available Only)</label>
           <select class="form-select" id="transferTargetTableSelect"></select>
         </div>
-
         <button class="btn btn-primary w-100 fw-bold py-2" onclick="submitTableTransfer()">
           <i class="fa-solid fa-check me-1"></i>Confirm Table Transfer
         </button>
@@ -701,17 +711,14 @@
           <label class="form-label fw-semibold">Source Table (Table to move FROM)</label>
           <select class="form-select" id="mergeSourceTableSelect" onchange="onMergeSourceTableChange()"></select>
         </div>
-
         <div class="mb-3">
           <label class="form-label fw-semibold">Target Table (Table to combine INTO)</label>
           <select class="form-select" id="mergeTargetTableSelect"></select>
         </div>
-
         <div class="alert alert-warning small mb-3">
           <i class="fa-solid fa-triangle-exclamation me-1"></i>
           All items from the source table will be appended to the target table order, and the source table will be freed.
         </div>
-
         <button class="btn btn-warning w-100 fw-bold py-2" onclick="submitTableMerge()">
           <i class="fa-solid fa-code-merge me-1"></i>Confirm &amp; Merge Orders
         </button>
@@ -774,58 +781,8 @@
         </div>
       </div>
       <div class="modal-body">
-        <ul class="nav nav-pills mb-3 border-bottom pb-2" role="tablist">
-          <li class="nav-item"><button class="nav-link active fw-bold" data-bs-toggle="pill" data-bs-target="#helpOverview"><i class="fa-solid fa-circle-info me-1"></i>Overview</button></li>
-          <li class="nav-item"><button class="nav-link fw-bold" data-bs-toggle="pill" data-bs-target="#helpWaiter"><i class="fa-solid fa-gauge-high me-1"></i>Dashboard</button></li>
-          <li class="nav-item"><button class="nav-link fw-bold" data-bs-toggle="pill" data-bs-target="#helpCounter"><i class="fa-solid fa-receipt me-1"></i>Counter</button></li>
-          <li class="nav-item"><button class="nav-link fw-bold" data-bs-toggle="pill" data-bs-target="#helpKitchen"><i class="fa-solid fa-fire me-1"></i>Kitchen (KDS)</button></li>
-          <li class="nav-item"><button class="nav-link fw-bold" data-bs-toggle="pill" data-bs-target="#helpAdmin"><i class="fa-solid fa-sliders me-1"></i>Admin Setting</button></li>
-          <li class="nav-item"><button class="nav-link fw-bold" data-bs-toggle="pill" data-bs-target="#helpEOD"><i class="fa-solid fa-moon me-1"></i>Reports &amp; End of Day</button></li>
-          <li class="nav-item"><button class="nav-link fw-bold" data-bs-toggle="pill" data-bs-target="#helpTips"><i class="fa-solid fa-life-ring me-1"></i>Offline &amp; Troubleshooting</button></li>
-        </ul>
-
-        <div class="tab-content">
-          <div class="tab-pane fade show active" id="helpOverview">
-            <h6 class="fw-bold text-primary mb-2">User Roles &amp; Screens</h6>
-            <div class="table-responsive mb-3">
-              <table class="table table-sm small align-middle">
-                <thead><tr><th>Role</th><th>Screens</th><th>Main Tasks</th></tr></thead>
-                <tbody>
-                  <tr><td><strong>Waiter</strong></td><td>Dashboard</td><td>Create orders, transfer / merge tables, reserve tables, serve ready orders.</td></tr>
-                  <tr><td><strong>Counter</strong></td><td>Counter, Dashboard</td><td>Confirm &amp; collect payment, discounts, receipts, kitchen tickets, serve.</td></tr>
-                  <tr><td><strong>Kitchen</strong></td><td>Kitchen (KDS)</td><td>Accept orders, set prep time, mark ready.</td></tr>
-                  <tr><td><strong>Admin / Manager</strong></td><td>All screens + Admin Setting</td><td>Multi-branch switching, settings, menu, tables, users, reports, end of day.</td></tr>
-                </tbody>
-              </table>
-            </div>
-            <h6 class="fw-bold text-primary mb-2">Order Lifecycle</h6>
-            <ol class="small text-muted mb-0">
-              <li><strong>PENDING COUNTER</strong> – order created, waiting at the Counter.</li>
-              <li><strong>CONFIRMED BY COUNTER</strong> – paid via <code>Pay &amp; Confirm</code>, sent to the kitchen.</li>
-              <li><strong>ACCEPTED BY KITCHEN</strong> → <strong>PREPARING</strong> – kitchen accepts and starts cooking with an ETA.</li>
-              <li><strong>READY</strong> – cooked; waiters/counter get an alert.</li>
-              <li><strong>SERVED</strong> – delivered to the guest; tap table to clean.</li>
-            </ol>
-          </div>
-          <div class="tab-pane fade" id="helpWaiter">
-            <p class="small text-muted">Tap <code>+ New Order</code> to create dine-in or takeout orders. Tap an Available table to reserve it, or tap an active table to free/clean it. Use <strong>Transfer</strong> or <strong>Merge Tables</strong> to manage floor seating.</p>
-          </div>
-          <div class="tab-pane fade" id="helpCounter">
-            <p class="small text-muted">Click <code>Pay &amp; Confirm</code> on pending orders to apply Philippine VAT, Senior Citizen / PWD 20% VAT-exempt discounts, manual discounts, or Delivery platforms, then print 80mm thermal receipts.</p>
-          </div>
-          <div class="tab-pane fade" id="helpKitchen">
-            <p class="small text-muted">Tap <code>Accept Order</code>, set preparation minutes, click <code>Start Prep</code>, and tap <code>Mark Ready</code> when cooked.</p>
-          </div>
-          <div class="tab-pane fade" id="helpAdmin">
-            <p class="small text-muted">Global Admins can switch branches from the top navbar, add new branches under <strong>Branches</strong>, manage branch-specific menu availability/pricing, tables, categories, and staff accounts.</p>
-          </div>
-          <div class="tab-pane fade" id="helpEOD">
-            <p class="small text-muted">Generate the End of Day Z-reading report for any business date, print the 80mm summary, and close the POS day.</p>
-          </div>
-          <div class="tab-pane fade" id="helpTips">
-            <p class="small text-muted">Offline actions queue automatically in IndexedDB and sync when connectivity returns.</p>
-          </div>
-        </div>
+        <h6 class="fw-bold text-primary mb-2">User Roles &amp; Screens</h6>
+        <p class="small text-muted">Supabase Realtime keeps Kitchen (KDS), Counter, and Dashboard tables synchronized instantaneously across all devices in the branch.</p>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary w-100 fw-bold" data-bs-dismiss="modal">Close Manual</button>
@@ -834,7 +791,7 @@
   </div>
 </div>
 
-<!-- RESTRUCTURED PAYMENT MODAL -->
+<!-- PAYMENT MODAL -->
 <div class="modal fade" id="paymentModal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-centered">
     <div class="modal-content">
@@ -844,9 +801,7 @@
       </div>
       <div class="modal-body">
         <input type="hidden" id="payOrderId">
-        
         <div class="row g-3">
-          <!-- LEFT SIDE: CUSTOMER INFO, SENIOR/PWD, DISCOUNT & BILLING SUMMARY -->
           <div class="col-md-6 border-end pe-md-3">
             <div class="mb-3">
               <label class="form-label small fw-semibold">Customer Name (optional)</label>
@@ -897,68 +852,31 @@
             </div>
 
             <div class="border rounded p-3 bg-light">
-              <div class="d-flex justify-content-between small mb-1">
-                <span>Subtotal:</span>
-                <strong id="paySubtotalDisplay">₱0.00</strong>
-              </div>
-              <div class="d-flex justify-content-between small mb-1 d-none" id="payLessVatRowDisplay">
-                <span>Less: VAT-Exempt (<span id="payLessVatPct">12</span>%):</span>
-                <span id="payLessVatDisplay" class="text-danger">-₱0.00</span>
-              </div>
-              <div class="d-flex justify-content-between small mb-1">
-                <span>Discount:</span>
-                <span id="payDiscountAmtDisplay" class="text-danger">-₱0.00</span>
-              </div>
-              <div class="d-flex justify-content-between small mb-1" id="payTaxRowDisplay">
-                <span>Tax:</span>
-                <span id="payTaxDisplay" class="fw-semibold">₱0.00</span>
-              </div>
-              <div class="d-flex justify-content-between small mb-1" id="payServiceRowDisplay">
-                <span>Service Charge:</span>
-                <span id="payServiceDisplay" class="fw-semibold">₱0.00</span>
-              </div>
+              <div class="d-flex justify-content-between small mb-1"><span>Subtotal:</span><strong id="paySubtotalDisplay">₱0.00</strong></div>
+              <div class="d-flex justify-content-between small mb-1 d-none" id="payLessVatRowDisplay"><span>Less: VAT-Exempt (<span id="payLessVatPct">12</span>%):</span><span id="payLessVatDisplay" class="text-danger">-₱0.00</span></div>
+              <div class="d-flex justify-content-between small mb-1"><span>Discount:</span><span id="payDiscountAmtDisplay" class="text-danger">-₱0.00</span></div>
+              <div class="d-flex justify-content-between small mb-1" id="payTaxRowDisplay"><span>Tax:</span><span id="payTaxDisplay" class="fw-semibold">₱0.00</span></div>
+              <div class="d-flex justify-content-between small mb-1" id="payServiceRowDisplay"><span>Service Charge:</span><span id="payServiceDisplay" class="fw-semibold">₱0.00</span></div>
               <hr class="my-2">
-              <div class="d-flex justify-content-between fs-5 fw-bold text-danger">
-                <span>Grand Total Due:</span>
-                <strong id="payGrandTotalDisplay">₱0.00</strong>
-              </div>
+              <div class="d-flex justify-content-between fs-5 fw-bold text-danger"><span>Grand Total Due:</span><strong id="payGrandTotalDisplay">₱0.00</strong></div>
               <div id="payVatInfoDisplay" class="small text-muted border-top mt-2 pt-2 d-none"></div>
             </div>
           </div>
 
-          <!-- RIGHT SIDE: PAYMENT & TRANSACTION DETAILS -->
           <div class="col-md-6 ps-md-3">
-            <div class="mb-2">
-              <label class="form-label fw-semibold small">Amount Due</label>
-              <input class="form-control form-control-lg fw-bold text-danger bg-light" id="payDue" readonly>
-            </div>
-            <div class="mb-2">
-              <label class="form-label fw-semibold small">Amount Received</label>
-              <input type="number" step="0.01" class="form-control form-control-lg fw-bold text-success" id="payReceived" placeholder="0.00" oninput="calcChange()">
-            </div>
-            <div class="mb-2">
-              <label class="form-label fw-semibold small">Change</label>
-              <input class="form-control fw-bold bg-light" id="payChange" readonly>
-            </div>
+            <div class="mb-2"><label class="form-label fw-semibold small">Amount Due</label><input class="form-control form-control-lg fw-bold text-danger bg-light" id="payDue" readonly></div>
+            <div class="mb-2"><label class="form-label fw-semibold small">Amount Received</label><input type="number" step="0.01" class="form-control form-control-lg fw-bold text-success" id="payReceived" placeholder="0.00" oninput="calcChange()"></div>
+            <div class="mb-2"><label class="form-label fw-semibold small">Change</label><input class="form-control fw-bold bg-light" id="payChange" readonly></div>
             <div class="mb-2">
               <label class="form-label fw-semibold small">Payment Method</label>
               <select class="form-select" id="payMethod">
-                <option value="Cash">Cash</option>
-                <option value="Card">Card</option>
-                <option value="GCash">GCash</option>
-                <option value="PayMaya">PayMaya</option>
+                <option value="Cash">Cash</option><option value="Card">Card</option><option value="GCash">GCash</option><option value="PayMaya">PayMaya</option>
               </select>
             </div>
-            <div class="mb-3">
-              <label class="form-label fw-semibold small">Reference # (optional)</label>
-              <input class="form-control" id="payRef" placeholder="e.g. GCash Ref # / Card Trace #">
-            </div>
-            <button class="btn btn-success w-100 fw-bold py-2 fs-6 shadow-sm" onclick="submitPayment()">
-              <i class="fa-solid fa-check-circle me-1"></i>Confirm Payment
-            </button>
+            <div class="mb-3"><label class="form-label fw-semibold small">Reference # (optional)</label><input class="form-control" id="payRef" placeholder="e.g. GCash Ref # / Card Trace #"></div>
+            <button class="btn btn-success w-100 fw-bold py-2 fs-6 shadow-sm" onclick="submitPayment()"><i class="fa-solid fa-check-circle me-1"></i>Confirm Payment</button>
           </div>
         </div>
-
       </div>
     </div>
   </div>
@@ -968,20 +886,12 @@
 <div class="modal fade" id="receiptModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
-      <div class="modal-header bg-dark text-white">
-        <h5 class="modal-title"><i class="fa-solid fa-receipt me-2"></i>Transaction Receipt</h5>
-        <button class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body bg-light">
-        <div id="receiptPreviewContent" class="receipt-preview shadow-sm"></div>
-      </div>
+      <div class="modal-header bg-dark text-white"><h5 class="modal-title"><i class="fa-solid fa-receipt me-2"></i>Transaction Receipt</h5><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body bg-light"><div id="receiptPreviewContent" class="receipt-preview shadow-sm"></div></div>
       <div class="modal-footer flex-column align-items-stretch">
         <div class="input-group">
           <span class="input-group-text"><i class="fa-solid fa-print"></i></span>
-          <select class="form-select print-mode-select" onchange="setPrintMode(this.value)" title="Printer type">
-            <option value="thermal">Thermal Printer (80mm)</option>
-            <option value="standard">Standard Printer (A4 / Letter)</option>
-          </select>
+          <select class="form-select print-mode-select" onchange="setPrintMode(this.value)"><option value="thermal">Thermal Printer (80mm)</option><option value="standard">Standard Printer (A4 / Letter)</option></select>
         </div>
         <button class="btn btn-primary w-100 fw-bold" onclick="printReceipt()"><i class="fa-solid fa-print me-2"></i>Print Receipt</button>
       </div>
@@ -993,16 +903,9 @@
 <div class="modal fade" id="orderReadyModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content border-success shadow-lg">
-      <div class="modal-header bg-success text-white">
-        <h5 class="modal-title fw-bold"><i class="fa-solid fa-bell me-2"></i>Order Ready to Serve!</h5>
-        <button class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
+      <div class="modal-header bg-success text-white"><h5 class="modal-title fw-bold"><i class="fa-solid fa-bell me-2"></i>Order Ready to Serve!</h5><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
       <div class="modal-body text-center py-3" id="orderReadyModalBody"></div>
-      <div class="modal-footer">
-        <button class="btn btn-success w-100 fw-bold py-2" data-bs-dismiss="modal">
-          <i class="fa-solid fa-check me-2"></i>Acknowledge &amp; Serve
-        </button>
-      </div>
+      <div class="modal-footer"><button class="btn btn-success w-100 fw-bold py-2" data-bs-dismiss="modal"><i class="fa-solid fa-check me-2"></i>Acknowledge &amp; Serve</button></div>
     </div>
   </div>
 </div>
@@ -1011,19 +914,11 @@
 <div class="modal fade" id="eodRequiredModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content border-warning">
-      <div class="modal-header bg-warning">
-        <h5 class="modal-title fw-bold"><i class="fa-solid fa-triangle-exclamation me-2"></i>Generate Report First</h5>
-        <button class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body text-center py-3">
-        <p class="mb-1 fw-semibold">You must generate the End of Day report before closing the POS.</p>
-        <p class="small text-muted mb-0">Generate (and print) the report first so you have a record of the sales.</p>
-      </div>
+      <div class="modal-header bg-warning"><h5 class="modal-title fw-bold"><i class="fa-solid fa-triangle-exclamation me-2"></i>Generate Report First</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body text-center py-3"><p class="mb-1 fw-semibold">You must generate the End of Day report before closing the POS.</p></div>
       <div class="modal-footer">
         <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button class="btn btn-warning fw-bold" onclick="hideModal('eodRequiredModal'); loadEODReport();">
-          <i class="fa-solid fa-file-lines me-1"></i>Generate Report Now
-        </button>
+        <button class="btn btn-warning fw-bold" onclick="hideModal('eodRequiredModal'); loadEODReport();"><i class="fa-solid fa-file-lines me-1"></i>Generate Report Now</button>
       </div>
     </div>
   </div>
@@ -1033,27 +928,12 @@
 <div class="modal fade" id="kitchenTicketModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
-      <div class="modal-header bg-dark text-white">
-        <h5 class="modal-title"><i class="fa-solid fa-print me-2"></i>Kitchen Ticket Preview</h5>
-        <button class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body bg-light">
-        <div id="kitchenTicketPreviewContent" class="receipt-preview shadow-sm"></div>
-      </div>
+      <div class="modal-header bg-dark text-white"><h5 class="modal-title"><i class="fa-solid fa-print me-2"></i>Kitchen Ticket Preview</h5><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body bg-light"><div id="kitchenTicketPreviewContent" class="receipt-preview shadow-sm"></div></div>
       <div class="modal-footer">
-        <div class="w-100">
-        <div class="input-group">
-          <span class="input-group-text"><i class="fa-solid fa-print"></i></span>
-          <select class="form-select print-mode-select" onchange="setPrintMode(this.value)" title="Printer type">
-            <option value="thermal">Thermal Printer (80mm)</option>
-            <option value="standard">Standard Printer (A4 / Letter)</option>
-          </select>
-        </div>
-        </div>
+        <div class="w-100"><div class="input-group"><span class="input-group-text"><i class="fa-solid fa-print"></i></span><select class="form-select print-mode-select" onchange="setPrintMode(this.value)"><option value="thermal">Thermal Printer (80mm)</option><option value="standard">Standard Printer (A4 / Letter)</option></select></div></div>
         <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
-        <button class="btn btn-primary fw-bold" onclick="printKitchenTicketNow()">
-          <i class="fa-solid fa-print me-2"></i>Print Kitchen Ticket
-        </button>
+        <button class="btn btn-primary fw-bold" onclick="printKitchenTicketNow()"><i class="fa-solid fa-print me-2"></i>Print Kitchen Ticket</button>
       </div>
     </div>
   </div>
@@ -1091,7 +971,8 @@ function initSb(token) {
     throw new Error('Configure SUPABASE_URL and SUPABASE_ANON_KEY in index.html first.');
   }
   sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: { headers: token ? { 'x-pos-token': token } : {} }
+    global: { headers: token ? { 'x-pos-token': token } : {} },
+    realtime: { params: { eventsPerSecond: 10 } }
   });
   return sbClient;
 }
@@ -1099,7 +980,7 @@ function initSb(token) {
 /* ============================================================
    CONSTANTS & GLOBAL STATE
    ============================================================ */
-const APP_VERSION = 'v4.3.6-SB';
+const APP_VERSION = 'v4.4.0-RT';
 const KDS_STATUSES = ['CONFIRMED_BY_COUNTER', 'ACCEPTED_BY_KITCHEN', 'PREPARING'];
 const FOOD_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150"><rect width="150" height="150" fill="#cccccc"/>' +
@@ -1109,7 +990,8 @@ const state = {
   user: null, token: null, activeBranchId: null, branches: [],
   settings: {}, categories: [], menu: [], menuById: {},
   tables: [], orders: [], users: [], stats: {}, currentView: 'waiter', cart: [],
-  pollTimer: null, polling: false, lastSync: null, version: null,
+  pollTimer: null, polling: false, realtimeChannel: null, realtimeConnected: false,
+  lastSync: null, version: null,
   knownKdsOrderIds: new Set(), knownReadyOrderIds: new Set(), alertsPrimed: false,
   prepInputs: {}, activeCategoryFilter: 'ALL', queue: [], flushing: false, submitting: false, localPayments: {},
   eodGenerated: null
@@ -1273,7 +1155,7 @@ function showModal(id) { bootstrap.Modal.getOrCreateInstance($(id)).show(); }
 function hideModal(id) { const m = bootstrap.Modal.getInstance($(id)); if (m) m.hide(); }
 
 /* ============================================================
-   SUPABASE BACKEND ADAPTER (REPLACES google.script.run)
+   SUPABASE BACKEND ADAPTER (BRANCH-SCOPED SETTINGS + REPORTS)
    ============================================================ */
 async function callServer(fnName, ...args) {
   if (!sbClient) initSb(state.token);
@@ -1298,8 +1180,9 @@ async function callServer(fnName, ...args) {
       return { valid: true };
     }
     case 'getBootstrapData': {
-      const [setRes, catRes, menuRes, tblRes, usrRes, brRes] = await Promise.all([
-        sbClient.from('system_settings').select('*'),
+      const [setRes, mainSetRes, catRes, menuRes, tblRes, usrRes, brRes] = await Promise.all([
+        sbClient.from('system_settings').select('*').eq('BranchID', bId),
+        sbClient.from('system_settings').select('*').eq('BranchID', 'branch-main'),
         sbClient.from('categories').select('*').order('SortOrder', { ascending: true }),
         sbClient.from('v_branch_menu').select('*').eq('BranchID', bId).order('Name', { ascending: true }),
         sbClient.from('restaurant_tables').select('*').eq('BranchID', bId).order('TableNumber', { ascending: true }),
@@ -1307,6 +1190,7 @@ async function callServer(fnName, ...args) {
         sbClient.from('branches').select('*').eq('Active', true).order('BranchName', { ascending: true })
       ]);
       const settings = {};
+      (mainSetRes.data || []).forEach(r => { settings[r.Key] = r.Value; });
       (setRes.data || []).forEach(r => { settings[r.Key] = r.Value; });
       return {
         settings,
@@ -1522,10 +1406,10 @@ async function callServer(fnName, ...args) {
     }
     case 'saveSystemSettings': {
       const [, cfg] = args;
-      const rows = Object.keys(cfg).map(k => ({ Key: k, Value: String(cfg[k]) }));
-      const { error } = await sbClient.from('system_settings').upsert(rows);
+      const rows = Object.keys(cfg).map(k => ({ BranchID: bId, Key: k, Value: String(cfg[k]) }));
+      const { error } = await sbClient.from('system_settings').upsert(rows, { onConflict: 'BranchID,Key' });
       if (error) throw new Error(error.message);
-      await logActivity('UPDATE_SETTINGS', 'Settings', 'GLOBAL', 'Updated POS settings');
+      await logActivity('UPDATE_SETTINGS', 'Settings', bId, 'Updated branch POS settings');
       return { success: true };
     }
     case 'saveMenuItem': {
@@ -1607,12 +1491,19 @@ async function callServer(fnName, ...args) {
     }
     case 'getSalesReport': {
       const [, opts = {}] = args;
-      let q = sbClient.from('orders').select('*').eq('BranchID', bId);
-      if (opts.startDate) q = q.gte('CreatedAt', `${opts.startDate}T00:00:00`);
-      if (opts.endDate) q = q.lte('CreatedAt', `${opts.endDate}T23:59:59`);
+      const allBranches = opts.allBranches === true && state.user?.role === 'Admin';
+      let oQuery = sbClient.from('orders').select('*');
+      let iQuery = sbClient.from('order_items').select('*');
+      if (!allBranches) {
+        oQuery = oQuery.eq('BranchID', bId);
+        iQuery = iQuery.eq('BranchID', bId);
+      }
+      if (opts.startDate) oQuery = oQuery.gte('CreatedAt', `${opts.startDate}T00:00:00`);
+      if (opts.endDate) oQuery = oQuery.lte('CreatedAt', `${opts.endDate}T23:59:59`);
+
       const [{ data: allOrds }, { data: allItms }] = await Promise.all([
-        q.order('CreatedAt', { ascending: false }),
-        sbClient.from('order_items').select('*').eq('BranchID', bId)
+        oQuery.order('CreatedAt', { ascending: false }),
+        iQuery
       ]);
       const orders = allOrds || [];
       const paid = orders.filter(o => o.PaymentStatus === 'PAID');
@@ -1638,6 +1529,30 @@ async function callServer(fnName, ...args) {
         };
       }
 
+      // Per-branch consolidated breakdown
+      const branchNameMap = {};
+      (state.branches || []).forEach(b => { branchNameMap[b.BranchID] = `${b.BranchName} (${b.BranchCode})`; });
+      const branchMap = {};
+      (state.branches || []).forEach(b => {
+        branchMap[b.BranchID] = { branchId: b.BranchID, branchName: `${b.BranchName} (${b.BranchCode})`, orders: 0, subtotal: 0, discount: 0, tax: 0, sales: 0 };
+      });
+      paid.forEach(o => {
+        const bid = o.BranchID || 'branch-main';
+        if (!branchMap[bid]) branchMap[bid] = { branchId: bid, branchName: branchNameMap[bid] || bid, orders: 0, subtotal: 0, discount: 0, tax: 0, sales: 0 };
+        branchMap[bid].orders++;
+        branchMap[bid].subtotal += Number(o.Subtotal || 0);
+        branchMap[bid].discount += Number(o.Discount || 0);
+        branchMap[bid].tax += Number(o.Tax || 0);
+        branchMap[bid].sales += Number(o.GrandTotal || 0);
+      });
+      const branchBreakdown = Object.values(branchMap)
+        .sort((a, b) => b.sales - a.sales)
+        .map(b => ({
+          ...b,
+          avgOrder: b.orders ? b.sales / b.orders : 0,
+          share: totalSales ? ((b.sales / totalSales) * 100).toFixed(1) : '0.0'
+        }));
+
       const topMap = {};
       items.forEach(i => {
         const name = i.ItemNameSnapshot || i.ItemName;
@@ -1653,22 +1568,10 @@ async function callServer(fnName, ...args) {
         share: totalSub ? ((x.sales / totalSub) * 100).toFixed(1) : '0.0'
       }));
 
-      const pmMap = {};
-      paid.forEach(o => {
-        const m = o.PaymentMethod || 'Cash';
-        if (!pmMap[m]) pmMap[m] = { label: m, count: 0, amount: 0 };
-        pmMap[m].count++;
-        pmMap[m].amount += Number(o.GrandTotal || 0);
-      });
-      const paymentMethods = Object.values(pmMap).map(x => ({
-        ...x,
-        share: totalSales ? ((x.amount / totalSales) * 100).toFixed(1) : '0.0'
-      }));
-
       const dailyMap = {};
       paid.forEach(o => {
         const dKey = (o.PaidAt || o.CreatedAt || '').slice(0, 10);
-        if (!dailyMap[dKey]) dailyMap[dKey] = { date: dKey, orders: 0, items: 0, subtotal: 0, discount: 0, tax: 0, service: 0, sales: 0 };
+        if (!dailyMap[dKey]) dailyMap[dKey] = { date: dKey, orders: 0, subtotal: 0, discount: 0, tax: 0, service: 0, sales: 0 };
         dailyMap[dKey].orders++;
         dailyMap[dKey].subtotal += Number(o.Subtotal || 0);
         dailyMap[dKey].discount += Number(o.Discount || 0);
@@ -1683,47 +1586,27 @@ async function callServer(fnName, ...args) {
         return {
           date: dt.toLocaleDateString(),
           time: dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          branch: branchNameMap[o.BranchID] || o.BranchID || 'Main',
           orderNumber: o.OrderNumber,
           table: o.TableNumber || 'Takeout',
           customer: o.CustomerName || 'Walk-In',
-          waiter: o.WaiterName || '—',
-          cashier: o.CounterName || '—',
           method: o.PaymentMethod || 'Cash',
-          reference: o.ReferenceNumber || '',
           itemQty: oItems.reduce((s, i) => s + Number(i.Quantity || i.Qty || 0), 0),
-          itemsText: oItems.map(i => `${i.Quantity || i.Qty}x ${i.ItemNameSnapshot || i.ItemName}`).join(', '),
           subtotal: Number(o.Subtotal || 0),
           discount: Number(o.Discount || 0),
-          discountReason: o.DiscountReason || '',
-          seniorPwdId: o.SeniorPwdId || '',
           tax: Number(o.Tax || 0),
-          service: Number(o.ServiceCharge || 0),
           total: Number(o.GrandTotal || 0)
         };
       });
 
       return {
         currency: curr(),
+        allBranches,
         range: { start: opts.startDate, end: opts.endDate },
-        generatedLabel: new Date().toLocaleString(),
         totals: { sales: totalSales, subtotal: totalSub, discount: totalDisc, tax: totalTax, service: totalSrv, items: totalItems },
-        counts: { paid: paid.length, cancelled: cancelled.length, open: open.length, openValue: open.reduce((s, o) => s + Number(o.GrandTotal || 0), 0) },
+        counts: { paid: paid.length, cancelled: cancelled.length, open: open.length },
         averageOrderValue: paid.length ? totalSales / paid.length : 0,
-        discountSummary: {
-          orders: paid.filter(o => Number(o.Discount || 0) > 0).length,
-          rate: totalSub ? ((totalDisc / totalSub) * 100).toFixed(1) : '0.0',
-          seniorOrders: paid.filter(o => o.DiscountType === 'Senior/PWD').length,
-          seniorAmount: paid.filter(o => o.DiscountType === 'Senior/PWD').reduce((s, o) => s + Number(o.Discount || 0), 0),
-          manualAmount: paid.filter(o => o.DiscountType !== 'Senior/PWD').reduce((s, o) => s + Number(o.Discount || 0), 0)
-        },
-        highlights: {},
-        paymentMethods,
-        deliveryPlatforms: [],
-        categories: [],
-        stations: [],
-        hourly: [],
-        waiters: [],
-        cashiers: [],
+        branchBreakdown,
         topItems,
         daily: Object.values(dailyMap).sort((a, b) => b.date.localeCompare(a.date)),
         orders: orderRows
@@ -1741,14 +1624,6 @@ async function callServer(fnName, ...args) {
       const totalCollected = paid.reduce((s, o) => s + Number(o.AmountTendered || o.GrandTotal || 0), 0);
       const totalChange = paid.reduce((s, o) => s + Number(o.ChangeAmount || 0), 0);
 
-      const pmMap = {};
-      paid.forEach(o => {
-        const m = o.PaymentMethod || 'Cash';
-        if (!pmMap[m]) pmMap[m] = { method: m, label: m, count: 0, amount: 0 };
-        pmMap[m].count++;
-        pmMap[m].amount += Number(o.GrandTotal || 0);
-      });
-
       const paidIds = new Set(paid.map(o => o.OrderID));
       const soldItems = (itms || []).filter(i => paidIds.has(i.OrderID));
       const itemMap = {};
@@ -1765,8 +1640,6 @@ async function callServer(fnName, ...args) {
         restaurantName: state.settings.RESTAURANT_NAME || 'Restaurant POS',
         reportNo: 'Z-' + dateVal.replace(/-/g, ''),
         date: dateVal,
-        generatedAt: new Date().toISOString(),
-        generatedBy: state.user?.fullName || 'Admin',
         currency: curr(),
         totals: {
           subtotal: paid.reduce((s, o) => s + Number(o.Subtotal || 0), 0),
@@ -1776,58 +1649,11 @@ async function callServer(fnName, ...args) {
           tax: paid.reduce((s, o) => s + Number(o.Tax || 0), 0),
           vatableSales: paid.reduce((s, o) => s + Number(o.VatableSales || 0), 0),
           vatExemptSales: paid.reduce((s, o) => s + Number(o.VatExemptSales || 0), 0),
-          sales: totalSales,
-          averageOrder: paid.length ? totalSales / paid.length : 0
+          sales: totalSales
         },
-        orderCounts: {
-          paid: paid.length,
-          cancelled: orders.filter(o => ['CANCELLED', 'VOIDED'].includes(o.OrderStatus)).length,
-          open: orders.filter(o => o.PaymentStatus !== 'PAID' && !['CANCELLED', 'VOIDED'].includes(o.OrderStatus)).length,
-          discounted: paid.filter(o => Number(o.Discount || 0) > 0).length
-        },
-        paymentSummary: Object.values(pmMap),
         totalCollected,
         totalChange,
-        totalNet: totalCollected - totalChange,
-        cashierSummary: [],
-        transactions: paid.map((o, idx) => ({
-          no: idx + 1,
-          orderNumber: o.OrderNumber,
-          tableNumber: o.TableNumber || 'Takeout',
-          amount: Number(o.GrandTotal || 0),
-          timeLabel: new Date(o.PaidAt || o.CreatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          customer: o.CustomerName || 'Walk-In',
-          method: o.PaymentMethod || 'Cash',
-          cashier: o.CounterName || '—',
-          reference: o.ReferenceNumber || '',
-          paid: Number(o.AmountTendered || o.GrandTotal || 0),
-          due: Number(o.GrandTotal || 0),
-          change: Number(o.ChangeAmount || 0)
-        })),
-        referenceTransactions: paid.filter(o => o.PaymentMethod !== 'Cash').map(o => ({
-          method: o.PaymentMethod,
-          orderNumber: o.OrderNumber,
-          amount: Number(o.GrandTotal || 0),
-          timeLabel: new Date(o.PaidAt || o.CreatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          customer: o.CustomerName || '',
-          reference: o.ReferenceNumber || ''
-        })),
-        itemsSold: Object.values(itemMap),
-        itemsTotalQty: Object.values(itemMap).reduce((s, x) => s + x.quantity, 0),
-        itemsTotalAmount: Object.values(itemMap).reduce((s, x) => s + x.total, 0),
-        discountDetails: paid.filter(o => Number(o.Discount || 0) > 0).map(o => ({
-          orderNumber: o.OrderNumber,
-          tableNumber: o.TableNumber || 'Takeout',
-          amount: Number(o.Discount || 0),
-          timeLabel: new Date(o.PaidAt || o.CreatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          customer: o.CustomerName || 'Walk-In',
-          isSenior: o.DiscountType === 'Senior/PWD',
-          idNumber: o.SeniorPwdId || '',
-          percent: o.DiscountType === 'Senior/PWD' ? getSeniorPct() : '',
-          reason: o.DiscountReason || ''
-        })),
-        discountTotal: paid.reduce((s, o) => s + Number(o.Discount || 0), 0),
-        loggedInUsers: []
+        itemsSold: Object.values(itemMap)
       };
     }
     case 'archiveAndResetPOS': {
@@ -1862,9 +1688,8 @@ async function callServer(fnName, ...args) {
       const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(dump, null, 2))));
       return { base64Data: b64, fileName: `pos_backup_${bId}_${todayStr()}.json` };
     }
-    case 'setupDatabase': {
+    case 'setupDatabase':
       return { success: true };
-    }
     default:
       throw new Error(`Unknown operation: ${fnName}`);
   }
@@ -1894,6 +1719,43 @@ async function logActivity(action, entityType, entityId, details) {
 }
 
 /* ============================================================
+   SUPABASE REALTIME INSTANT SYNC ENGINE
+   ============================================================ */
+const triggerRealtimeRefresh = debounce(() => {
+  if (state.token) poll(true);
+}, 180);
+
+function startRealtime() {
+  stopRealtime();
+  if (!sbClient || !state.token) return;
+  const bId = state.activeBranchId || (state.user && state.user.branchId) || 'branch-main';
+
+  state.realtimeChannel = sbClient
+    .channel(`pos-branch-${bId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `BranchID=eq.${bId}` }, () => {
+      triggerRealtimeRefresh();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items', filter: `BranchID=eq.${bId}` }, () => {
+      triggerRealtimeRefresh();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurant_tables', filter: `BranchID=eq.${bId}` }, () => {
+      triggerRealtimeRefresh();
+    })
+    .subscribe((status) => {
+      state.realtimeConnected = (status === 'SUBSCRIBED');
+      updateSyncIndicator(navigator.onLine);
+    });
+}
+
+function stopRealtime() {
+  if (state.realtimeChannel && sbClient) {
+    try { sbClient.removeChannel(state.realtimeChannel); } catch (e) {}
+  }
+  state.realtimeChannel = null;
+  state.realtimeConnected = false;
+}
+
+/* ============================================================
    MULTI-BRANCH SWITCHER & MANAGEMENT
    ============================================================ */
 function renderBranchSwitcher() {
@@ -1912,10 +1774,19 @@ function renderBranchSwitcher() {
 
 async function switchBranch(branchId) {
   state.activeBranchId = branchId;
+  state.eodGenerated = null;
+  state.alertsPrimed = false;
+  state.knownKdsOrderIds.clear();
+  state.knownReadyOrderIds.clear();
   lsSet('pos_admin_branch', branchId);
   showLoading('Switching branch…');
   await loadBootstrap();
+  startRealtime();
   await poll(true);
+  if (state.currentView === 'admin') {
+    loadAdminStats();
+    if ($('eodReport')) $('eodReport').innerHTML = '';
+  }
   hideLoading();
 }
 
@@ -1961,9 +1832,10 @@ function resetBranchForm() {
 
 async function saveBranch(e) {
   e.preventDefault();
+  const isNew = !$('cfgBranchId').value;
   try {
-    showLoading('Saving branch…');
-    const { error } = await sbClient.rpc('pos_admin_save_branch', {
+    showLoading(isNew ? 'Creating branch & copying Main Branch settings…' : 'Updating branch…');
+    const { data, error } = await sbClient.rpc('pos_admin_save_branch', {
       p_branch_id: $('cfgBranchId').value || null,
       p_branch_name: $('cfgBranchName').value.trim(),
       p_branch_code: $('cfgBranchCode').value.trim(),
@@ -1971,7 +1843,10 @@ async function saveBranch(e) {
       p_active: true
     });
     if (error) throw new Error(error.message);
-    showDone('Branch saved!', () => { resetBranchForm(); loadBootstrap(); });
+    showDone(isNew ? 'Branch created with Main Branch settings!' : 'Branch updated!', () => {
+      resetBranchForm();
+      loadBootstrap();
+    });
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
@@ -2163,7 +2038,7 @@ async function logout(opts) {
     if (state.token && !opts.expired && navigator.onLine) await callServerT(8000, 'logoutUser', state.token);
   } catch (e) {}
 
-  lsDel('pos_auth'); stopPolling();
+  lsDel('pos_auth'); stopPolling(); stopRealtime();
   state.token = null; state.user = null; state.cart = []; state.queue = [];
   state.version = null; state.bootVer = null; state.adminLoadedAt = 0; state.alertsPrimed = false; state.eodGenerated = null;
   state.knownKdsOrderIds.clear(); state.knownReadyOrderIds.clear();
@@ -2202,6 +2077,7 @@ async function initSession() {
   const allowed = allowedViews();
   switchView(allowed[0] || 'counter');
   await loadBootstrap();
+  startRealtime();
   startPolling();
 }
 
@@ -2230,8 +2106,11 @@ function applyRoleNav() {
     el.style.display = allowed.includes(el.dataset.view) ? '' : 'none';
     el.onclick = (ev) => { ev.preventDefault(); switchView(el.dataset.view); };
   });
+  const isGlobalAdmin = state.user.role === 'Admin';
   const brTab = $('adminBranchesTabBtn');
-  if (brTab) brTab.style.display = state.user.role === 'Admin' ? '' : 'none';
+  if (brTab) brTab.style.display = isGlobalAdmin ? '' : 'none';
+  const rScopeWrap = $('reportScopeWrap');
+  if (rScopeWrap) rScopeWrap.style.display = isGlobalAdmin ? '' : 'none';
   if (allowed.length && !allowed.includes(state.currentView)) switchView(allowed[0]);
 }
 
@@ -2253,7 +2132,11 @@ async function restoreCache() {
 function applyBootstrap(data) {
   state.settings = data.settings || state.settings || {};
   state.categories = data.categories || [];
-  state.menu = data.menuItems || [];
+  state.menu = (data.menuItems || []).map(m => ({
+    ...m,
+    MenuItemID: m.MenuItemID || m.ItemID,
+    ItemName: m.ItemName || m.Name || 'Unnamed Item'
+  }));
   state.menuById = {};
   state.menu.forEach(m => { state.menuById[m.MenuItemID] = m; });
   if (data.tables) state.tables = data.tables;
@@ -2264,6 +2147,10 @@ function applyBootstrap(data) {
   }
   $('brandName').textContent = state.settings.RESTAURANT_NAME || 'POS System';
   document.title = state.settings.RESTAURANT_NAME || 'Restaurant Management System';
+  const activeBr = (state.branches || []).find(b => b.BranchID === state.activeBranchId);
+  if ($('settingsBranchBadge')) {
+    $('settingsBranchBadge').textContent = activeBr ? `Branch: ${activeBr.BranchName} (${activeBr.BranchCode})` : 'Current Branch Settings';
+  }
   renderBranchSwitcher();
   renderBranchesAdminTable();
   populateAdminForms();
@@ -2344,7 +2231,8 @@ function startPolling() {
     if (!state.token) return;
     await poll();
     if (!state.token) return;
-    state.pollTimer = setTimeout(loop, document.hidden ? 15000 : 4000);
+    const interval = state.realtimeConnected ? 20000 : (document.hidden ? 15000 : 4000);
+    state.pollTimer = setTimeout(loop, interval);
   };
   loop();
 }
@@ -2354,19 +2242,28 @@ function stopPolling() {
   state.pollTimer = null;
 }
 
-document.addEventListener('visibilitychange', () => { if (!document.hidden && state.token) startPolling(); });
-window.addEventListener('online', () => { if (!state.token) return; updateSyncIndicator(false); startPolling(); });
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.token) {
+    if (!state.realtimeConnected) startRealtime();
+    poll(true);
+  }
+});
+window.addEventListener('online', () => { if (!state.token) return; updateSyncIndicator(false); startRealtime(); poll(true); });
 window.addEventListener('offline', () => { updateSyncIndicator(false); if (state.token) showOffline(); });
 
 function updateSyncIndicator(ok) {
   const el = $('syncStatus');
   if (!el) return;
   const q = state.queue.length ? ` · ${state.queue.length} queued` : '';
-  el.innerHTML = ok
-    ? `<i class="fa-solid fa-check text-success me-1"></i>Synced ${state.lastSync ? state.lastSync.toLocaleTimeString() : ''}${q}`
-    : (navigator.onLine
-        ? `<i class="fa-solid fa-triangle-exclamation text-warning me-1"></i>Retrying…${q}`
-        : `<i class="fa-solid fa-triangle-exclamation text-warning me-1"></i>Offline${q}`);
+  if (!ok || !navigator.onLine) {
+    el.innerHTML = navigator.onLine
+      ? `<i class="fa-solid fa-triangle-exclamation text-warning me-1"></i>Retrying…${q}`
+      : `<i class="fa-solid fa-triangle-exclamation text-warning me-1"></i>Offline${q}`;
+    return;
+  }
+  el.innerHTML = state.realtimeConnected
+    ? `<i class="fa-solid fa-bolt text-success me-1"></i>Realtime Live${q}`
+    : `<i class="fa-solid fa-check text-success me-1"></i>Synced ${state.lastSync ? state.lastSync.toLocaleTimeString() : ''}${q}`;
 }
 
 function showOffline() {
@@ -2761,7 +2658,7 @@ function printKitchenTicket(orderId) {
 function getPrintMode() { return lsGet('pos_print_mode') === 'standard' ? 'standard' : 'thermal'; }
 function setPrintMode(mode) { lsSet('pos_print_mode', mode === 'standard' ? 'standard' : 'thermal'); syncPrintModeSelects(); }
 function syncPrintModeSelects() { const m = getPrintMode(); document.querySelectorAll('.print-mode-select').forEach(s => { s.value = m; }); }
-function printHtmlDocument(title, bodyHtml, kind) {
+function printHtmlDocument(title, bodyHtml) {
   const standard = getPrintMode() === 'standard';
   const win = window.open('', '_blank', standard ? 'width=820,height=900' : 'width=400,height=600');
   if (!win) { toast('Pop-up blocked. Allow pop-ups to print.', 'warning'); return false; }
@@ -2774,7 +2671,7 @@ function printHtmlDocument(title, bodyHtml, kind) {
 }
 function printKitchenTicketNow() {
   const content = $('kitchenTicketPreviewContent');
-  if (content) printHtmlDocument('Kitchen Ticket', content.innerHTML, 'ticket');
+  if (content) printHtmlDocument('Kitchen Ticket', content.innerHTML);
 }
 
 function renderKitchenDisplay() {
@@ -3006,7 +2903,7 @@ function renderReceiptPreview(data) {
 }
 function printReceipt() {
   const c = $('receiptPreviewContent');
-  if (c) printHtmlDocument('Print Receipt', c.innerHTML, 'receipt');
+  if (c) printHtmlDocument('Print Receipt', c.innerHTML);
 }
 
 function kitchenAccept(orderId) { return transition(orderId, 'ACCEPT_KITCHEN', {}, 'Accept order', 'Accepting…', 'Order accepted!'); }
@@ -3040,27 +2937,32 @@ function renderPOSMenu() {
   const term = ($('menuSearch')?.value || '').toLowerCase();
   const items = (state.menu || []).filter(m => {
     const isAvail = m.Available !== false && m.Available !== 'false';
-    const matchesSearch = !term || String(m.ItemName || '').toLowerCase().includes(term);
+    const name = String(m.ItemName || m.Name || '').toLowerCase();
+    const matchesSearch = !term || name.includes(term);
     const matchesCategory = state.activeCategoryFilter === 'ALL' || String(m.CategoryID) === String(state.activeCategoryFilter);
     return isAvail && matchesSearch && matchesCategory;
   });
   const grid = $('posMenuGrid');
   if (!grid) return;
-  grid.innerHTML = items.length ? items.map(m => `
-    <div class="col-6 col-md-4">
-      <div class="card card-pos p-2 text-center h-100" style="cursor:pointer" onclick="addToCart('${m.MenuItemID}')">
+  grid.innerHTML = items.length ? items.map(m => {
+    const id = m.MenuItemID || m.ItemID;
+    const name = m.ItemName || m.Name || 'Item';
+    return `<div class="col-6 col-md-4">
+      <div class="card card-pos p-2 text-center h-100" style="cursor:pointer" onclick="addToCart('${id}')">
         <img src="${escapeHtml(m.ImageURL || FOOD_PLACEHOLDER)}" loading="lazy" class="rounded mb-2" style="height:70px; object-fit:cover; width:100%;">
-        <h6 class="small fw-bold mb-1 text-truncate">${escapeHtml(m.ItemName)}</h6>
+        <h6 class="small fw-bold mb-1 text-truncate">${escapeHtml(name)}</h6>
         <span class="text-danger fw-bold small">${curr()}${Number(m.Price || 0).toFixed(2)}</span>
       </div>
-    </div>`).join('') : '<div class="col-12 text-center text-muted py-4">No available menu items found.</div>';
+    </div>`;
+  }).join('') : '<div class="col-12 text-center text-muted py-4">No available menu items found.</div>';
 }
 function addToCart(menuItemId) {
   const item = state.menuById[menuItemId];
   if (!item) return;
+  const name = item.ItemName || item.Name || 'Item';
   const existing = state.cart.find(c => c.menuItemId === menuItemId);
   if (existing) existing.quantity++;
-  else state.cart.push({ menuItemId, itemName: item.ItemName, price: Number(item.Price || 0), quantity: 1, station: item.Station });
+  else state.cart.push({ menuItemId, itemName: name, price: Number(item.Price || 0), quantity: 1, station: item.Station });
   updateCartDisplay();
 }
 function computeTotals(gross, isSeniorPwd, manualDiscount) {
@@ -3142,10 +3044,10 @@ async function submitOrder() {
 }
 
 /* ============================================================
-   ADMIN FORMS & REPORTS
+   ADMIN FORMS & REPORTS (FIXED EDIT MENU ITEM + CONSOLIDATED)
    ============================================================ */
-function compressImageFile(file, maxChars = 42000) {
-  return new Promise((resolve, reject) => {
+function compressImageFile(file) {
+  return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const img = new Image();
@@ -3176,15 +3078,26 @@ function resetMenuForm() {
   $('cfgMenuFormTitle').textContent = 'Add / Edit Menu Item';
 }
 function editMenuItemById(id) {
-  const m = state.menuById[id];
-  if (!m) return;
-  $('cfgMenuId').value = m.MenuItemID; $('cfgMenuName').value = m.ItemName;
-  $('cfgMenuCategory').value = m.CategoryID; $('cfgMenuPrice').value = m.Price;
+  const m = state.menuById[id] || (state.menu || []).find(x => (x.MenuItemID || x.ItemID) === id);
+  if (!m) return toast('Menu item not found.', 'warning');
+  const itemId = m.MenuItemID || m.ItemID;
+  const itemName = m.ItemName || m.Name || 'Unnamed Item';
+  $('cfgMenuId').value = itemId;
+  $('cfgMenuName').value = itemName;
+  if (m.CategoryID) $('cfgMenuCategory').value = m.CategoryID;
+  $('cfgMenuPrice').value = m.Price ?? '';
   $('cfgMenuStation').value = m.Station || 'Kitchen';
-  $('cfgMenuAvailable').value = m.Available ? 'true' : 'false';
+  $('cfgMenuAvailable').value = (m.Available !== false && m.Available !== 'false') ? 'true' : 'false';
   $('cfgMenuImageUrl').value = m.ImageURL || '';
-  if (m.ImageURL) { $('cfgMenuImagePreview').src = m.ImageURL; $('cfgMenuImagePreview').classList.remove('d-none'); $('cfgMenuNoImgText').classList.add('d-none'); }
-  $('cfgMenuFormTitle').textContent = `Edit Menu Item (${m.ItemName})`;
+  if (m.ImageURL) {
+    $('cfgMenuImagePreview').src = m.ImageURL;
+    $('cfgMenuImagePreview').classList.remove('d-none');
+    $('cfgMenuNoImgText').classList.add('d-none');
+  } else {
+    $('cfgMenuImagePreview').classList.add('d-none');
+    $('cfgMenuNoImgText').classList.remove('d-none');
+  }
+  $('cfgMenuFormTitle').textContent = `Edit Menu Item (${itemName})`;
 }
 async function saveMenuItem(e) {
   e.preventDefault();
@@ -3231,15 +3144,19 @@ function populateAdminForms() {
   $('cfgMenuCategory').innerHTML = catList.map(c => `<option value="${c.CategoryID}">${escapeHtml(c.CategoryName)}</option>`).join('');
   const catById = {}; catList.forEach(c => { catById[c.CategoryID] = c; });
 
-  setHtml($('menuTableBody'), (state.menu || []).map(m => `<tr>
-    <td>${m.ImageURL ? `<img src="${escapeHtml(m.ImageURL)}" class="img-preview-thumb">` : `<div class="img-preview-thumb d-flex align-items-center justify-content-center text-muted"><i class="fa-solid fa-utensils"></i></div>`}</td>
-    <td><strong>${escapeHtml(m.ItemName)}</strong></td>
-    <td>${escapeHtml(catById[m.CategoryID]?.CategoryName || m.Category || '')}</td>
-    <td>${curr()}${Number(m.Price || 0).toFixed(2)}</td>
-    <td><span class="badge bg-dark">${escapeHtml(m.Station || 'Kitchen')}</span></td>
-    <td>${m.Available ? '<span class="badge bg-success">Available</span>' : '<span class="badge bg-danger">Unavailable</span>'}</td>
-    <td><button class="btn btn-sm btn-outline-primary fw-bold" onclick="editMenuItemById('${m.MenuItemID}')">Edit</button></td>
-  </tr>`).join(''));
+  setHtml($('menuTableBody'), (state.menu || []).map(m => {
+    const id = m.MenuItemID || m.ItemID;
+    const name = m.ItemName || m.Name || 'Unnamed Item';
+    return `<tr>
+      <td>${m.ImageURL ? `<img src="${escapeHtml(m.ImageURL)}" class="img-preview-thumb">` : `<div class="img-preview-thumb d-flex align-items-center justify-content-center text-muted"><i class="fa-solid fa-utensils"></i></div>`}</td>
+      <td><strong>${escapeHtml(name)}</strong></td>
+      <td>${escapeHtml(catById[m.CategoryID]?.CategoryName || m.Category || '')}</td>
+      <td>${curr()}${Number(m.Price || 0).toFixed(2)}</td>
+      <td><span class="badge bg-dark">${escapeHtml(m.Station || 'Kitchen')}</span></td>
+      <td>${m.Available ? '<span class="badge bg-success">Available</span>' : '<span class="badge bg-danger">Unavailable</span>'}</td>
+      <td><button class="btn btn-sm btn-outline-primary fw-bold" onclick="editMenuItemById('${id}')">Edit</button></td>
+    </tr>`;
+  }).join(''));
 
   setHtml($('tablesTableBody'), (state.tables || []).map(t => `<tr>
     <td><strong>${escapeHtml(t.TableNumber)}</strong></td>
@@ -3282,7 +3199,7 @@ function onToggleDisableKds(el) {
 async function saveSettings(e) {
   e.preventDefault();
   try {
-    showLoading('Saving settings…');
+    showLoading('Saving branch settings…');
     await callServer('saveSystemSettings', state.token, {
       RESTAURANT_NAME: $('cfgRestaurantName').value, TAX_RATE_PERCENT: $('cfgTaxRate').value,
       SERVICE_CHARGE_PERCENT: $('cfgServiceCharge').value, SENIOR_PWD_DISCOUNT_PERCENT: $('cfgSeniorPwdDiscount').value,
@@ -3352,24 +3269,78 @@ function setReportRange(kind) {
 }
 async function loadSalesReport() {
   try {
-    showLoading('Generating sales report…');
-    const data = await callServer('getSalesReport', state.token, { startDate: $('reportStart').value || null, endDate: $('reportEnd').value || null });
+    const allBranches = ($('reportBranchScope')?.value === 'ALL') && state.user?.role === 'Admin';
+    showLoading(allBranches ? 'Generating consolidated cross-branch report…' : 'Generating sales report…');
+    const data = await callServer('getSalesReport', state.token, {
+      startDate: $('reportStart').value || null,
+      endDate: $('reportEnd').value || null,
+      allBranches
+    });
     hideLoading(); _lastSalesReport = data; renderSalesReport(data);
   } catch (e) { hideLoading(); toast(e.message, 'danger'); }
 }
 function renderSalesReport(d) {
   const c = d.currency || curr(), fmt = n => c + Number(n || 0).toFixed(2), t = d.totals || {}, cn = d.counts || {};
+  const badge = $('reportScopeBadge');
+  if (badge) {
+    badge.textContent = d.allBranches ? 'All Branches (Consolidated)' : 'Current Branch';
+    badge.className = d.allBranches ? 'badge bg-warning text-dark' : 'badge bg-secondary';
+  }
+
   $('reportSummary').innerHTML = `<div class="row g-2"><div class="col-6 col-md-3"><div class="stat-card bg-primary"><h6>Net Sales</h6><h4>${fmt(t.sales)}</h4></div></div><div class="col-6 col-md-3"><div class="stat-card bg-success"><h6>Paid Orders</h6><h4>${cn.paid || 0}</h4></div></div><div class="col-6 col-md-3"><div class="stat-card bg-warning"><h6>Avg Order</h6><h4>${fmt(d.averageOrderValue)}</h4></div></div><div class="col-6 col-md-3"><div class="stat-card bg-info"><h6>Items Sold</h6><h4>${t.items || 0}</h4></div></div></div>`;
+
+  // Cross-branch consolidated breakdown table
+  const brWrap = $('reportBranchComparison');
+  if (brWrap) {
+    if (d.allBranches && (d.branchBreakdown || []).length) {
+      brWrap.innerHTML = `
+        <div class="border rounded p-3 bg-light">
+          <h6 class="fw-bold text-primary mb-2"><i class="fa-solid fa-code-branch me-1"></i>Sales by Branch (Consolidated Comparison)</h6>
+          <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0 bg-white">
+              <thead class="table-dark">
+                <tr>
+                  <th>Branch</th>
+                  <th class="text-end">Orders</th>
+                  <th class="text-end">Gross</th>
+                  <th class="text-end">Discounts</th>
+                  <th class="text-end">Tax</th>
+                  <th class="text-end">Net Sales</th>
+                  <th class="text-end">Avg Order</th>
+                  <th class="text-end">Share</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${d.branchBreakdown.map(b => `<tr>
+                  <td><strong>${escapeHtml(b.branchName)}</strong></td>
+                  <td class="text-end">${b.orders}</td>
+                  <td class="text-end">${fmt(b.subtotal)}</td>
+                  <td class="text-end text-danger">-${fmt(b.discount)}</td>
+                  <td class="text-end">${fmt(b.tax)}</td>
+                  <td class="text-end fw-bold text-success">${fmt(b.sales)}</td>
+                  <td class="text-end">${fmt(b.avgOrder)}</td>
+                  <td class="text-end"><span class="badge bg-primary">${b.share}%</span></td>
+                </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+    } else {
+      brWrap.innerHTML = '';
+    }
+  }
+
   $('reportTopItems').innerHTML = `<table class="table table-sm"><thead><tr><th>Item</th><th class="text-end">Qty</th><th class="text-end">Sales</th></tr></thead><tbody>${(d.topItems || []).map(i => `<tr><td>${escapeHtml(i.name)}</td><td class="text-end">${i.quantity}</td><td class="text-end">${fmt(i.sales)}</td></tr>`).join('')}</tbody></table>`;
-  $('reportOrders').innerHTML = `<table class="table table-sm"><thead><tr><th>Date</th><th>Order #</th><th>Table</th><th>Method</th><th class="text-end">Total</th></tr></thead><tbody>${(d.orders || []).map(o => `<tr><td>${escapeHtml(o.date)}</td><td>${escapeHtml(o.orderNumber)}</td><td>${escapeHtml(o.table)}</td><td>${escapeHtml(o.method)}</td><td class="text-end fw-bold">${fmt(o.total)}</td></tr>`).join('')}</tbody></table>`;
+  $('reportDaily').innerHTML = `<table class="table table-sm"><thead><tr><th>Date</th><th class="text-end">Orders</th><th class="text-end">Net Sales</th></tr></thead><tbody>${(d.daily || []).map(dy => `<tr><td>${escapeHtml(dy.date)}</td><td class="text-end">${dy.orders}</td><td class="text-end fw-bold">${fmt(dy.sales)}</td></tr>`).join('')}</tbody></table>`;
+  $('reportOrders').innerHTML = `<table class="table table-sm"><thead><tr><th>Date</th>${d.allBranches ? '<th>Branch</th>' : ''}<th>Order #</th><th>Table</th><th>Method</th><th class="text-end">Total</th></tr></thead><tbody>${(d.orders || []).map(o => `<tr><td>${escapeHtml(o.date)}</td>${d.allBranches ? `<td><span class="badge bg-dark">${escapeHtml(o.branch)}</span></td>` : ''}<td>${escapeHtml(o.orderNumber)}</td><td>${escapeHtml(o.table)}</td><td>${escapeHtml(o.method)}</td><td class="text-end fw-bold">${fmt(o.total)}</td></tr>`).join('')}</tbody></table>`;
 }
 function exportSalesReportCsv() {
   const d = _lastSalesReport;
   if (!d || !(d.orders || []).length) return toast('Generate a report first.', 'warning');
-  const lines = ['Date,Order #,Table,Method,Total'].concat(d.orders.map(o => `${o.date},${o.orderNumber},${o.table},${o.method},${o.total}`));
+  const lines = ['Date,Branch,Order #,Table,Method,Total'].concat(d.orders.map(o => `${o.date},"${o.branch}",${o.orderNumber},${o.table},${o.method},${o.total}`));
   const link = document.createElement('a');
   link.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(lines.join('\r\n'));
-  link.download = `sales_${todayStr()}.csv`;
+  link.download = `sales_${d.allBranches ? 'all_branches_' : ''}${todayStr()}.csv`;
   link.click();
 }
 
@@ -3392,7 +3363,7 @@ async function loadEODReport() {
 function printEODReport() {
   const area = $('eodPrintArea');
   if (!area) return toast('Generate the report first.', 'warning');
-  printHtmlDocument('EOD Sales Report', area.outerHTML, 'receipt');
+  printHtmlDocument('EOD Sales Report', area.outerHTML);
 }
 async function closePOS() {
   const dateVal = $('eodDate').value || todayStr();
@@ -3412,7 +3383,7 @@ async function downloadZipBackup() {
   link.click();
 }
 function openHelpModal() { showModal('helpModal'); }
-function printSystemHelpGuide() { printHtmlDocument('Operations Guide', $('helpModal').querySelector('.modal-body').innerHTML, 'ticket'); }
+function printSystemHelpGuide() { printHtmlDocument('Operations Guide', $('helpModal').querySelector('.modal-body').innerHTML); }
 function openChangePasswordModal() { showModal('changePwModal'); }
 async function submitChangePassword() {
   const oldPw = $('cpOldPw').value, newPw = $('cpNewPw').value, newPw2 = $('cpNewPw2').value;
