@@ -2,7 +2,7 @@
 // Replace YOUR-PROJECT-REF with your Supabase project reference
 // (Supabase Dashboard > Project Settings > General > Reference ID).
 window.POS_CONFIG = {
-  API_URL: "https://dhmekquviaoxxiqhxxih.supabase.co/rest/v1/"
+  API_URL: "https://dhmekquviaoxxiqhxxih.supabase.co"
 };
 window.SUPABASE_CONFIG = {
   URL: 'https://dhmekquviaoxxiqhxxih.supabase.co/rest/v1/',
