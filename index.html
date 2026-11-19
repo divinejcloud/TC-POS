@@ -11,6 +11,8 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- Optional git-ignored config.js for private deployments (fails silently if absent) -->
+<script src="config.js" onerror="window.__NO_EXTERNAL_CONFIG=true"></script>
 <style>
   :root {
     --primary-color: #1e293b;
@@ -141,7 +143,12 @@
       </div>
       <button type="submit" id="btnLoginSubmit" class="btn btn-warning w-100 fw-bold py-2">Sign In</button>
     </form>
-    <p class="text-center text-muted small mt-3 mb-0" id="loginVersion"></p>
+    <div class="d-flex justify-content-between align-items-center mt-3">
+      <span class="text-muted small" id="loginVersion"></span>
+      <button type="button" class="btn btn-link btn-sm text-muted p-0 text-decoration-none" onclick="openDbConfigModal()">
+        <i class="fa-solid fa-database me-1"></i>Connection Setup
+      </button>
+    </div>
   </div>
 </div>
 
@@ -164,6 +171,7 @@
           </button>
           <ul class="dropdown-menu dropdown-menu-end">
             <li><a class="dropdown-item" href="#" onclick="openChangePasswordModal();return false;"><i class="fa-solid fa-key me-2"></i>Change Password</a></li>
+            <li><a class="dropdown-item" href="#" onclick="openDbConfigModal();return false;"><i class="fa-solid fa-database me-2"></i>Database Connection</a></li>
             <li><hr class="dropdown-divider"></li>
             <li><a class="dropdown-item text-danger" href="#" onclick="logout();return false;"><i class="fa-solid fa-right-from-bracket me-2"></i>Logout</a></li>
           </ul>
@@ -389,7 +397,7 @@
               <div class="card card-pos p-3">
                 <div class="d-flex justify-content-between align-items-center mb-3">
                   <h5 class="mb-0" id="cfgMenuFormTitle">Add / Edit Menu Item</h5>
-                  <button class="btn btn-sm btn-outline-secondary" onclick="resetMenuForm()"><i class="fa-solid fa-rotate-left me-1"></i>Reset Form</button>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="resetMenuForm()"><i class="fa-solid fa-rotate-left me-1"></i>Reset Form</button>
                 </div>
                 
                 <form onsubmit="saveMenuItem(event)" class="row g-3 mb-4">
@@ -408,7 +416,7 @@
 
                   <div class="col-md-2">
                     <label class="form-label small fw-semibold">Price (₱)</label>
-                    <input type="number" step="0.01" class="form-control" id="cfgMenuPrice" placeholder="0.00" required>
+                    <input type="number" step="0.01" min="0" class="form-control" id="cfgMenuPrice" placeholder="0.00" required>
                   </div>
 
                   <div class="col-md-2">
@@ -447,7 +455,22 @@
                   </div>
                 </form>
 
-                <h6 class="text-muted border-top pt-3">Existing Menu Items (Current Branch)</h6>
+                <div class="border-top pt-3 mb-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                  <div class="d-flex align-items-center gap-2">
+                    <h6 class="text-muted mb-0">Existing Menu Items (Current Branch)</h6>
+                    <span class="badge bg-secondary" id="adminMenuCountBadge">0 items</span>
+                  </div>
+                  <div class="d-flex flex-wrap gap-2">
+                    <div class="input-group input-group-sm" style="width: 220px;">
+                      <span class="input-group-text"><i class="fa-solid fa-magnifying-glass"></i></span>
+                      <input type="text" class="form-control" id="adminMenuSearch" placeholder="Search item or station…" oninput="renderAdminMenuTable()">
+                    </div>
+                    <select class="form-select form-select-sm" id="adminMenuCatFilter" style="width: 180px;" onchange="renderAdminMenuTable()">
+                      <option value="ALL">All Categories</option>
+                    </select>
+                  </div>
+                </div>
+
                 <div class="table-responsive">
                   <table class="table table-sm table-hover align-middle">
                     <thead>
@@ -458,7 +481,7 @@
                         <th>Price</th>
                         <th>Station</th>
                         <th>Status</th>
-                        <th>Action</th>
+                        <th class="text-end">Action</th>
                       </tr>
                     </thead>
                     <tbody id="menuTableBody"></tbody>
@@ -509,12 +532,13 @@
               </div>
             </div>
 
+            <!-- CATEGORIES TAB -->
             <div class="tab-pane fade" id="tabCategories">
               <div class="card card-pos p-3">
                 <form onsubmit="saveCategory(event)" class="row g-2 mb-4">
                   <div class="col-md-5"><input class="form-control" id="cfgCatName" placeholder="Category Name" required></div>
                   <div class="col-md-4"><input class="form-control" id="cfgCatDesc" placeholder="Description"></div>
-                  <div class="col-md-3"><button class="btn btn-info text-white w-100">Save</button></div>
+                  <div class="col-md-3"><button class="btn btn-info text-white w-100 fw-bold">Save Category</button></div>
                 </form>
                 <div id="categoriesList"></div>
               </div>
@@ -553,7 +577,7 @@
               </div>
             </div>
 
-            <!-- SALES REPORT TAB (WITH CROSS-BRANCH CONSOLIDATED OPTION FOR ADMIN) -->
+            <!-- SALES REPORT TAB -->
             <div class="tab-pane fade" id="tabReports">
               <div class="card card-pos p-3">
                 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -592,19 +616,27 @@
               </div>
             </div>
 
+            <!-- END OF DAY & Z-READING TAB (WITH OPENING CASH FLOAT) -->
             <div class="tab-pane fade" id="tabEOD">
               <div class="card card-pos p-3 mb-4">
-                <h5 class="mb-3"><i class="fa-solid fa-moon me-2"></i>End of Day Report &amp; Close POS</h5>
+                <h5 class="mb-3"><i class="fa-solid fa-moon me-2"></i>End of Day Z-Reading Report &amp; Close POS</h5>
                 <div class="row g-2 mb-3">
-                  <div class="col-md-3">
-                    <label class="form-label small">Business Date</label>
-                    <input type="date" class="form-control" id="eodDate">
+                  <div class="col-6 col-md-3">
+                    <label class="form-label small fw-semibold">Business Date</label>
+                    <input type="date" class="form-control" id="eodDate" onchange="syncEodFloatInput()">
                   </div>
-                  <div class="col-md-3 d-flex align-items-end">
+                  <div class="col-6 col-md-3">
+                    <label class="form-label small fw-semibold">Opening Cash Float</label>
+                    <div class="input-group">
+                      <span class="input-group-text" id="eodFloatCurrencyPrefix">₱</span>
+                      <input type="number" step="0.01" min="0" class="form-control" id="eodOpeningFloat" placeholder="0.00" oninput="saveEodFloatValue()">
+                    </div>
+                  </div>
+                  <div class="col-6 col-md-3 d-flex align-items-end">
                     <button class="btn btn-primary me-2" onclick="loadEODReport()">Generate Report</button>
                     <button class="btn btn-outline-secondary" onclick="printEODReport()"><i class="fa-solid fa-print me-1"></i>Print</button>
                   </div>
-                  <div class="col-md-6 d-flex align-items-end justify-content-end">
+                  <div class="col-6 col-md-3 d-flex align-items-end justify-content-end">
                     <button class="btn btn-danger" onclick="closePOS()">
                       <i class="fa-solid fa-power-off me-1"></i>Close POS for the Day
                     </button>
@@ -635,6 +667,39 @@
     <a href="#" class="nav-link" data-view="counter"><i class="fa-solid fa-receipt"></i><span>Counter</span></a>
     <a href="#" class="nav-link" data-view="kitchen"><i class="fa-solid fa-fire"></i><span>Kitchen</span></a>
     <a href="#" class="nav-link" data-view="admin"><i class="fa-solid fa-sliders"></i><span>Admin Setting</span></a>
+  </div>
+</div>
+
+<!-- SUPABASE CONNECTION SETUP MODAL (KEEPS KEYS OUT OF GITHUB) -->
+<div class="modal fade" id="dbConfigModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header bg-dark text-white">
+        <h5 class="modal-title"><i class="fa-solid fa-database text-warning me-2"></i>Supabase Connection Setup</h5>
+        <button class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted mb-3">
+          Credentials are stored locally on this browser only (or loaded from a git-ignored <code>config.js</code>) so no keys are committed to GitHub.
+        </p>
+        <div class="mb-3">
+          <label class="form-label small fw-semibold">Supabase Project URL</label>
+          <input type="url" class="form-control" id="cfgSbUrlInput" placeholder="https://your-project.supabase.co">
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-semibold">Supabase Anon Public Key</label>
+          <input type="password" class="form-control" id="cfgSbKeyInput" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6...">
+        </div>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-warning fw-bold flex-grow-1" onclick="saveDbConfig()">
+            <i class="fa-solid fa-floppy-disk me-1"></i>Save Connection
+          </button>
+          <button type="button" class="btn btn-outline-danger" onclick="clearDbConfig()" title="Clear saved browser credentials">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -956,31 +1021,85 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
+'use strict';
+
 /* ============================================================
-   SUPABASE CONFIGURATION (PASTE YOUR PROJECT CREDENTIALS HERE)
+   SECURE SUPABASE CREDENTIAL RESOLVER (GITHUB-SAFE)
+   Priority:
+   1. window.POS_CONFIG (from optional git-ignored config.js)
+   2. localStorage ('pos_sb_url' / 'pos_sb_key' set via UI modal)
+   3. Inline placeholders (safe to push to GitHub)
    ============================================================ */
-const SUPABASE_URL = 'https://dhmekquviaoxxiqhxxih.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRobWVrcXV2aWFveHhpcWh4eGloIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTUwOTA2NTIsImV4cCI6MjExMDY2NjY1Mn0.rKdhiL4u9O477jlK5NapE-plNuvuzavyg6zXqgyL8Y4';
+const DEFAULT_SUPABASE_URL = 'YOUR_SUPABASE_URL';
+const DEFAULT_SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+
+function getSupabaseCredentials() {
+  const ext = (window.POS_CONFIG && typeof window.POS_CONFIG === 'object') ? window.POS_CONFIG : {};
+  const url = String(ext.SUPABASE_URL || lsGet('pos_sb_url') || DEFAULT_SUPABASE_URL).trim();
+  const key = String(ext.SUPABASE_ANON_KEY || lsGet('pos_sb_key') || DEFAULT_SUPABASE_ANON_KEY).trim();
+  return { url, key };
+}
+
+function hasValidSupabaseCredentials() {
+  const { url, key } = getSupabaseCredentials();
+  return /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url) && key.length > 20 && key !== DEFAULT_SUPABASE_ANON_KEY;
+}
 
 let sbClient = null;
 function initSb(token) {
   if (!window.supabase || !window.supabase.createClient) {
-    throw new Error('Supabase CDN failed to load. Check internet connection.');
+    throw new Error('Supabase SDK failed to load. Check internet connection.');
   }
-  if (!SUPABASE_URL.startsWith('http') || SUPABASE_ANON_KEY === 'YOUR_SUPABASE_ANON_KEY') {
-    throw new Error('Configure SUPABASE_URL and SUPABASE_ANON_KEY in index.html first.');
+  const { url, key } = getSupabaseCredentials();
+  if (!hasValidSupabaseCredentials()) {
+    openDbConfigModal();
+    throw new Error('Supabase connection is not configured yet. Please enter your Project URL and Anon Key.');
   }
-  sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  sbClient = window.supabase.createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     global: { headers: token ? { 'x-pos-token': token } : {} },
     realtime: { params: { eventsPerSecond: 10 } }
   });
   return sbClient;
 }
 
+function openDbConfigModal() {
+  const { url, key } = getSupabaseCredentials();
+  if ($('cfgSbUrlInput')) $('cfgSbUrlInput').value = url.startsWith('http') ? url : '';
+  if ($('cfgSbKeyInput')) $('cfgSbKeyInput').value = key !== DEFAULT_SUPABASE_ANON_KEY ? key : '';
+  showModal('dbConfigModal');
+}
+
+function saveDbConfig() {
+  const url = ($('cfgSbUrlInput')?.value || '').trim().replace(/\/+$/, '');
+  const key = ($('cfgSbKeyInput')?.value || '').trim();
+  if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url)) {
+    return toast('Enter a valid Supabase URL (https://xxxx.supabase.co).', 'warning');
+  }
+  if (key.length < 20) {
+    return toast('Enter a valid Supabase Anon Public Key.', 'warning');
+  }
+  lsSet('pos_sb_url', url);
+  lsSet('pos_sb_key', key);
+  sbClient = null;
+  hideModal('dbConfigModal');
+  toast('Supabase connection saved locally on this device.', 'success');
+}
+
+function clearDbConfig() {
+  if (!confirm('Clear saved Supabase credentials from this browser?')) return;
+  lsDel('pos_sb_url');
+  lsDel('pos_sb_key');
+  sbClient = null;
+  if ($('cfgSbUrlInput')) $('cfgSbUrlInput').value = '';
+  if ($('cfgSbKeyInput')) $('cfgSbKeyInput').value = '';
+  toast('Saved credentials cleared.', 'info');
+}
+
 /* ============================================================
    CONSTANTS & GLOBAL STATE
    ============================================================ */
-const APP_VERSION = 'v4.4.0-RT';
+const APP_VERSION = 'v4.7.0-RT';
 const KDS_STATUSES = ['CONFIRMED_BY_COUNTER', 'ACCEPTED_BY_KITCHEN', 'PREPARING'];
 const FOOD_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150"><rect width="150" height="150" fill="#cccccc"/>' +
@@ -1115,7 +1234,7 @@ function debounce(fn, ms) {
 }
 
 function uuid() {
-  try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+  try { if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID(); } catch (e) {}
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16);
   });
@@ -1138,6 +1257,13 @@ function getSeniorPct() {
   return isNaN(p) ? 20 : Math.min(100, Math.max(0, p));
 }
 
+function resolveMenuPrice(m) {
+  if (!m) return 0;
+  const raw = m.EffectivePrice ?? m.PriceOverride ?? m.Price ?? 0;
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : 0;
+}
+
 function showLoading(msg) {
   $('loadingOverlay').style.display = 'flex';
   $('loadingSpinner').style.display = 'inline-block';
@@ -1155,7 +1281,43 @@ function showModal(id) { bootstrap.Modal.getOrCreateInstance($(id)).show(); }
 function hideModal(id) { const m = bootstrap.Modal.getInstance($(id)); if (m) m.hide(); }
 
 /* ============================================================
-   SUPABASE BACKEND ADAPTER (BRANCH-SCOPED SETTINGS + REPORTS)
+   OPENING CASH FLOAT HELPERS (EOD Z-READING)
+   ============================================================ */
+function getEodFloatKey(dateVal) {
+  const bId = state.activeBranchId || (state.user && state.user.branchId) || 'branch-main';
+  return `pos_eod_float_${bId}_${dateVal || todayStr()}`;
+}
+
+function syncEodFloatInput() {
+  const input = $('eodOpeningFloat');
+  if (!input) return;
+  if ($('eodFloatCurrencyPrefix')) $('eodFloatCurrencyPrefix').textContent = curr();
+  const dateVal = $('eodDate')?.value || todayStr();
+  const saved = lsGet(getEodFloatKey(dateVal));
+  input.value = saved !== null ? saved : '';
+}
+
+function saveEodFloatValue() {
+  const dateVal = $('eodDate')?.value || todayStr();
+  const raw = $('eodOpeningFloat')?.value ?? '';
+  if (raw === '') {
+    lsDel(getEodFloatKey(dateVal));
+  } else {
+    const val = Math.max(0, parseFloat(raw) || 0);
+    lsSet(getEodFloatKey(dateVal), val.toFixed(2));
+  }
+}
+
+function getEodOpeningFloat() {
+  const raw = $('eodOpeningFloat')?.value;
+  if (raw !== undefined && raw !== '') return Math.max(0, parseFloat(raw) || 0);
+  const dateVal = $('eodDate')?.value || todayStr();
+  const saved = lsGet(getEodFloatKey(dateVal));
+  return saved ? Math.max(0, parseFloat(saved) || 0) : 0;
+}
+
+/* ============================================================
+   SUPABASE BACKEND ADAPTER
    ============================================================ */
 async function callServer(fnName, ...args) {
   if (!sbClient) initSb(state.token);
@@ -1415,25 +1577,53 @@ async function callServer(fnName, ...args) {
     case 'saveMenuItem': {
       const [, m] = args;
       const cat = state.categories.find(c => c.CategoryID === m.CategoryID);
+      const isNew = !m.MenuItemID;
       const itemId = m.MenuItemID || uuid();
+      const parsedPrice = parseFloat(m.Price) || 0;
+
       const { error } = await sbClient.from('menu_items').upsert({
         ItemID: itemId,
-        Name: m.ItemName,
+        Name: m.ItemName.trim(),
         CategoryID: m.CategoryID,
         Category: cat ? cat.CategoryName : 'General',
-        Price: parseFloat(m.Price),
+        Price: parsedPrice,
         Station: m.Station,
         ImageURL: m.ImageURL || null,
         Available: m.Available
-      });
+      }, { onConflict: 'ItemID' });
       if (error) throw new Error(error.message);
-      await sbClient.from('branch_menu_items').upsert({
-        BranchMenuID: uuid(),
-        BranchID: bId,
-        ItemID: itemId,
-        Available: m.Available
-      }, { onConflict: 'BranchID,ItemID' });
+
+      if (isNew && (state.branches || []).length > 0) {
+        const branchRows = state.branches.map(br => ({
+          BranchMenuID: uuid(),
+          BranchID: br.BranchID,
+          ItemID: itemId,
+          PriceOverride: parsedPrice,
+          Available: m.Available
+        }));
+        const { error: bmErr } = await sbClient.from('branch_menu_items').upsert(branchRows, { onConflict: 'BranchID,ItemID' });
+        if (bmErr) throw new Error(bmErr.message);
+      } else {
+        const { error: bmErr } = await sbClient.from('branch_menu_items').upsert({
+          BranchMenuID: uuid(),
+          BranchID: bId,
+          ItemID: itemId,
+          PriceOverride: parsedPrice,
+          Available: m.Available
+        }, { onConflict: 'BranchID,ItemID' });
+        if (bmErr) throw new Error(bmErr.message);
+      }
+
+      await logActivity(isNew ? 'CREATE_MENU_ITEM' : 'UPDATE_MENU_ITEM', 'MenuItem', itemId, `${m.ItemName} (${parsedPrice.toFixed(2)})`);
       return { success: true };
+    }
+    case 'deleteMenuItem': {
+      const [, itemId] = args;
+      await sbClient.from('branch_menu_items').delete().eq('ItemID', itemId);
+      const { error } = await sbClient.from('menu_items').delete().eq('ItemID', itemId);
+      if (error) throw new Error(error.message);
+      await logActivity('DELETE_MENU_ITEM', 'MenuItem', itemId, 'Deleted menu item');
+      return { success: true, message: 'Menu item deleted!' };
     }
     case 'saveTable': {
       const [, t] = args;
@@ -1464,6 +1654,15 @@ async function callServer(fnName, ...args) {
       });
       if (error) throw new Error(error.message);
       return { success: true };
+    }
+    case 'deleteCategory': {
+      const [, catId] = args;
+      const inUse = (state.menu || []).some(m => String(m.CategoryID) === String(catId));
+      if (inUse) throw new Error('Cannot delete category while menu items are still assigned to it.');
+      const { error } = await sbClient.from('categories').delete().eq('CategoryID', catId);
+      if (error) throw new Error(error.message);
+      await logActivity('DELETE_CATEGORY', 'Category', catId, 'Deleted category');
+      return { success: true, message: 'Category deleted!' };
     }
     case 'saveUser': {
       const [, u] = args;
@@ -1529,7 +1728,6 @@ async function callServer(fnName, ...args) {
         };
       }
 
-      // Per-branch consolidated breakdown
       const branchNameMap = {};
       (state.branches || []).forEach(b => { branchNameMap[b.BranchID] = `${b.BranchName} (${b.BranchCode})`; });
       const branchMap = {};
@@ -1613,34 +1811,75 @@ async function callServer(fnName, ...args) {
       };
     }
     case 'getEndOfDayReport': {
-      const [, dateVal] = args;
+      const [, dateVal, openingFloatRaw] = args;
+      const openingFloat = Math.max(0, Number(openingFloatRaw) || 0);
       const [{ data: ords }, { data: itms }] = await Promise.all([
         sbClient.from('orders').select('*').eq('BranchID', bId).gte('CreatedAt', `${dateVal}T00:00:00`).lte('CreatedAt', `${dateVal}T23:59:59`),
         sbClient.from('order_items').select('*').eq('BranchID', bId)
       ]);
       const orders = ords || [];
       const paid = orders.filter(o => o.PaymentStatus === 'PAID');
+      const cancelled = orders.filter(o => ['CANCELLED', 'VOIDED'].includes(o.OrderStatus));
+      const openOrders = orders.filter(o => o.PaymentStatus !== 'PAID' && !['CANCELLED', 'VOIDED'].includes(o.OrderStatus));
+
       const totalSales = paid.reduce((s, o) => s + Number(o.GrandTotal || 0), 0);
       const totalCollected = paid.reduce((s, o) => s + Number(o.AmountTendered || o.GrandTotal || 0), 0);
       const totalChange = paid.reduce((s, o) => s + Number(o.ChangeAmount || 0), 0);
 
+      const methodMap = {};
+      let cashSales = 0;
+      let cashTendered = 0;
+      paid.forEach(o => {
+        const label = o.PaymentMethod === 'Delivery' && o.DeliveryPlatform
+          ? `Delivery (${o.DeliveryPlatform})`
+          : (o.PaymentMethod || 'Cash');
+        if (!methodMap[label]) methodMap[label] = { method: label, count: 0, total: 0 };
+        methodMap[label].count++;
+        methodMap[label].total += Number(o.GrandTotal || 0);
+        if ((o.PaymentMethod || 'Cash') === 'Cash') {
+          cashSales += Number(o.GrandTotal || 0);
+          cashTendered += Number(o.AmountTendered || o.GrandTotal || 0);
+        }
+      });
+
       const paidIds = new Set(paid.map(o => o.OrderID));
       const soldItems = (itms || []).filter(i => paidIds.has(i.OrderID));
       const itemMap = {};
+      let totalItemsQty = 0;
       soldItems.forEach(i => {
         const nm = i.ItemNameSnapshot || i.ItemName;
         const q = Number(i.Quantity || i.Qty || 0);
         const up = Number(i.UnitPriceSnapshot || i.UnitPrice || 0);
+        totalItemsQty += q;
         if (!itemMap[nm]) itemMap[nm] = { name: nm, quantity: 0, unitPrice: up, total: 0 };
         itemMap[nm].quantity += q;
-        itemMap[nm].total += q * up;
+        itemMap[nm].total += Number(i.LineTotal || (q * up));
       });
 
+      const activeBr = (state.branches || []).find(b => b.BranchID === bId);
       return {
         restaurantName: state.settings.RESTAURANT_NAME || 'Restaurant POS',
+        branchName: activeBr ? `${activeBr.BranchName} (${activeBr.BranchCode})` : 'Main Branch',
+        branchAddress: activeBr?.Address || '',
+        generatedBy: state.user?.fullName || 'Admin',
+        printedAt: new Date().toLocaleString(),
         reportNo: 'Z-' + dateVal.replace(/-/g, ''),
         date: dateVal,
         currency: curr(),
+        counts: {
+          paid: paid.length,
+          cancelled: cancelled.length,
+          open: openOrders.length,
+          itemsQty: totalItemsQty
+        },
+        paymentBreakdown: Object.values(methodMap).sort((a, b) => b.total - a.total),
+        cashDrawer: {
+          openingFloat,
+          cashSales,
+          cashTendered,
+          changeGiven: totalChange,
+          expectedCash: openingFloat + cashSales
+        },
         totals: {
           subtotal: paid.reduce((s, o) => s + Number(o.Subtotal || 0), 0),
           lessVat: paid.reduce((s, o) => s + Number(o.LessVat || 0), 0),
@@ -1653,7 +1892,7 @@ async function callServer(fnName, ...args) {
         },
         totalCollected,
         totalChange,
-        itemsSold: Object.values(itemMap)
+        itemsSold: Object.values(itemMap).sort((a, b) => b.quantity - a.quantity)
       };
     }
     case 'archiveAndResetPOS': {
@@ -1785,6 +2024,7 @@ async function switchBranch(branchId) {
   await poll(true);
   if (state.currentView === 'admin') {
     loadAdminStats();
+    syncEodFloatInput();
     if ($('eodReport')) $('eodReport').innerHTML = '';
   }
   hideLoading();
@@ -1835,7 +2075,7 @@ async function saveBranch(e) {
   const isNew = !$('cfgBranchId').value;
   try {
     showLoading(isNew ? 'Creating branch & copying Main Branch settings…' : 'Updating branch…');
-    const { data, error } = await sbClient.rpc('pos_admin_save_branch', {
+    const { error } = await sbClient.rpc('pos_admin_save_branch', {
       p_branch_id: $('cfgBranchId').value || null,
       p_branch_name: $('cfgBranchName').value.trim(),
       p_branch_code: $('cfgBranchCode').value.trim(),
@@ -2055,6 +2295,7 @@ async function resumeSession() {
   try {
     const auth = JSON.parse(saved);
     if (!auth || !auth.token || !auth.user) return false;
+    if (!hasValidSupabaseCredentials()) return false;
     initSb(auth.token);
     if (navigator.onLine) {
       const v = await callServerT(15000, 'heartbeat', auth.token);
@@ -2132,11 +2373,15 @@ async function restoreCache() {
 function applyBootstrap(data) {
   state.settings = data.settings || state.settings || {};
   state.categories = data.categories || [];
-  state.menu = (data.menuItems || []).map(m => ({
-    ...m,
-    MenuItemID: m.MenuItemID || m.ItemID,
-    ItemName: m.ItemName || m.Name || 'Unnamed Item'
-  }));
+  state.menu = (data.menuItems || []).map(m => {
+    const resolvedPrice = resolveMenuPrice(m);
+    return {
+      ...m,
+      MenuItemID: m.MenuItemID || m.ItemID,
+      ItemName: m.ItemName || m.Name || 'Unnamed Item',
+      Price: resolvedPrice
+    };
+  });
   state.menuById = {};
   state.menu.forEach(m => { state.menuById[m.MenuItemID] = m; });
   if (data.tables) state.tables = data.tables;
@@ -2151,6 +2396,7 @@ function applyBootstrap(data) {
   if ($('settingsBranchBadge')) {
     $('settingsBranchBadge').textContent = activeBr ? `Branch: ${activeBr.BranchName} (${activeBr.BranchCode})` : 'Current Branch Settings';
   }
+  if ($('eodFloatCurrencyPrefix')) $('eodFloatCurrencyPrefix').textContent = curr();
   renderBranchSwitcher();
   renderBranchesAdminTable();
   populateAdminForms();
@@ -2184,6 +2430,7 @@ function switchView(view) {
       loadAdminStats(); loadActivityLogs();
     }
     if (!$('eodDate').value) $('eodDate').value = todayStr();
+    syncEodFloatInput();
   }
   renderCurrentView();
 }
@@ -2193,7 +2440,7 @@ function renderCurrentView() {
   if (v === 'waiter') { syncDashViewButtons(); renderTables(); renderWaiterOrders(); }
   else if (v === 'counter') { syncCounterViewButtons(); renderCounterQueue(); }
   else if (v === 'kitchen') renderKitchenDisplay();
-  if ($('orderModal').classList.contains('show')) updateCartDisplay();
+  if ($('orderModal').classList.contains('show')) { renderPOSMenu(); updateCartDisplay(); }
 }
 
 async function loadBootstrap() {
@@ -2927,7 +3174,7 @@ function renderPOSCategoryTabs() {
   if (!container) return;
   let html = `<button type="button" class="btn btn-sm ${state.activeCategoryFilter === 'ALL' ? 'btn-primary' : 'btn-outline-secondary'} rounded-pill px-3" onclick="selectPOSCategory('ALL')">All</button>`;
   (state.categories || []).forEach(c => {
-    html += `<button type="button" class="btn btn-sm ${state.activeCategoryFilter === c.CategoryID ? 'btn-primary' : 'btn-outline-secondary'} rounded-pill px-3" onclick="selectPOSCategory('${c.CategoryID}')">${escapeHtml(c.CategoryName)}</button>`;
+    html += `<button type="button" class="btn btn-sm ${state.activeCategoryFilter === c.CategoryID ? 'btn-primary' : 'btn-outline-secondary'} rounded-pill px-3" onclick="selectPOSCategory('${escapeHtml(c.CategoryID)}')">${escapeHtml(c.CategoryName)}</button>`;
   });
   container.innerHTML = html;
 }
@@ -2947,11 +3194,12 @@ function renderPOSMenu() {
   grid.innerHTML = items.length ? items.map(m => {
     const id = m.MenuItemID || m.ItemID;
     const name = m.ItemName || m.Name || 'Item';
+    const price = resolveMenuPrice(m);
     return `<div class="col-6 col-md-4">
-      <div class="card card-pos p-2 text-center h-100" style="cursor:pointer" onclick="addToCart('${id}')">
+      <div class="card card-pos p-2 text-center h-100" style="cursor:pointer" onclick="addToCart('${escapeHtml(id)}')">
         <img src="${escapeHtml(m.ImageURL || FOOD_PLACEHOLDER)}" loading="lazy" class="rounded mb-2" style="height:70px; object-fit:cover; width:100%;">
         <h6 class="small fw-bold mb-1 text-truncate">${escapeHtml(name)}</h6>
-        <span class="text-danger fw-bold small">${curr()}${Number(m.Price || 0).toFixed(2)}</span>
+        <span class="text-danger fw-bold small">${curr()}${price.toFixed(2)}</span>
       </div>
     </div>`;
   }).join('') : '<div class="col-12 text-center text-muted py-4">No available menu items found.</div>';
@@ -2960,9 +3208,10 @@ function addToCart(menuItemId) {
   const item = state.menuById[menuItemId];
   if (!item) return;
   const name = item.ItemName || item.Name || 'Item';
+  const price = resolveMenuPrice(item);
   const existing = state.cart.find(c => c.menuItemId === menuItemId);
   if (existing) existing.quantity++;
-  else state.cart.push({ menuItemId, itemName: name, price: Number(item.Price || 0), quantity: 1, station: item.Station });
+  else state.cart.push({ menuItemId, itemName: name, price, quantity: 1, station: item.Station });
   updateCartDisplay();
 }
 function computeTotals(gross, isSeniorPwd, manualDiscount) {
@@ -3044,7 +3293,7 @@ async function submitOrder() {
 }
 
 /* ============================================================
-   ADMIN FORMS & REPORTS (FIXED EDIT MENU ITEM + CONSOLIDATED)
+   ADMIN FORMS & REPORTS (SEARCH/FILTER, CATEGORY DELETE, EOD FLOAT)
    ============================================================ */
 function compressImageFile(file) {
   return new Promise((resolve) => {
@@ -3073,8 +3322,15 @@ async function previewMenuImage(input) {
   }
 }
 function resetMenuForm() {
-  $('cfgMenuId').value = ''; $('cfgMenuName').value = ''; $('cfgMenuPrice').value = '';
-  $('cfgMenuImageUrl').value = ''; $('cfgMenuImagePreview').classList.add('d-none'); $('cfgMenuNoImgText').classList.remove('d-none');
+  $('cfgMenuId').value = '';
+  $('cfgMenuName').value = '';
+  $('cfgMenuPrice').value = '';
+  $('cfgMenuStation').value = 'Kitchen';
+  $('cfgMenuAvailable').value = 'true';
+  if ($('cfgMenuImageFile')) $('cfgMenuImageFile').value = '';
+  $('cfgMenuImageUrl').value = '';
+  $('cfgMenuImagePreview').classList.add('d-none');
+  $('cfgMenuNoImgText').classList.remove('d-none');
   $('cfgMenuFormTitle').textContent = 'Add / Edit Menu Item';
 }
 function editMenuItemById(id) {
@@ -3082,13 +3338,17 @@ function editMenuItemById(id) {
   if (!m) return toast('Menu item not found.', 'warning');
   const itemId = m.MenuItemID || m.ItemID;
   const itemName = m.ItemName || m.Name || 'Unnamed Item';
+  const itemPrice = resolveMenuPrice(m);
+
   $('cfgMenuId').value = itemId;
   $('cfgMenuName').value = itemName;
   if (m.CategoryID) $('cfgMenuCategory').value = m.CategoryID;
-  $('cfgMenuPrice').value = m.Price ?? '';
+  $('cfgMenuPrice').value = itemPrice.toFixed(2);
   $('cfgMenuStation').value = m.Station || 'Kitchen';
   $('cfgMenuAvailable').value = (m.Available !== false && m.Available !== 'false') ? 'true' : 'false';
+  if ($('cfgMenuImageFile')) $('cfgMenuImageFile').value = '';
   $('cfgMenuImageUrl').value = m.ImageURL || '';
+
   if (m.ImageURL) {
     $('cfgMenuImagePreview').src = m.ImageURL;
     $('cfgMenuImagePreview').classList.remove('d-none');
@@ -3098,17 +3358,95 @@ function editMenuItemById(id) {
     $('cfgMenuNoImgText').classList.remove('d-none');
   }
   $('cfgMenuFormTitle').textContent = `Edit Menu Item (${itemName})`;
+  $('cfgMenuName').focus();
 }
 async function saveMenuItem(e) {
   e.preventDefault();
+  const isEdit = Boolean($('cfgMenuId').value);
   try {
-    showLoading('Saving menu item…');
+    showLoading(isEdit ? 'Updating menu item…' : 'Adding menu item…');
     await callServer('saveMenuItem', state.token, {
-      MenuItemID: $('cfgMenuId').value, ItemName: $('cfgMenuName').value, CategoryID: $('cfgMenuCategory').value,
-      Price: $('cfgMenuPrice').value, Station: $('cfgMenuStation').value, Available: $('cfgMenuAvailable').value === 'true', ImageURL: $('cfgMenuImageUrl').value
+      MenuItemID: $('cfgMenuId').value,
+      ItemName: $('cfgMenuName').value,
+      CategoryID: $('cfgMenuCategory').value,
+      Price: $('cfgMenuPrice').value,
+      Station: $('cfgMenuStation').value,
+      Available: $('cfgMenuAvailable').value === 'true',
+      ImageURL: $('cfgMenuImageUrl').value
     });
-    showDone('Menu item saved!', () => { resetMenuForm(); loadBootstrap(); });
+    showDone(isEdit ? 'Menu item updated!' : 'Menu item added!', async () => {
+      resetMenuForm();
+      await loadBootstrap();
+    });
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
+}
+async function deleteMenuItemById(id, itemName) {
+  if (!confirm(`Delete menu item "${itemName}"? This will remove it from all branches.`)) return;
+  try {
+    showLoading(`Deleting ${itemName}…`);
+    const res = await callServer('deleteMenuItem', state.token, id);
+    showDone(res.message || 'Menu item deleted!', async () => {
+      if ($('cfgMenuId').value === id) resetMenuForm();
+      await loadBootstrap();
+    });
+  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
+}
+
+function renderAdminMenuTable() {
+  const tbody = $('menuTableBody');
+  if (!tbody) return;
+  const catById = {};
+  (state.categories || []).forEach(c => { catById[c.CategoryID] = c; });
+
+  const searchTerm = ($('adminMenuSearch')?.value || '').trim().toLowerCase();
+  const catFilter = $('adminMenuCatFilter')?.value || 'ALL';
+
+  const filtered = (state.menu || []).filter(m => {
+    const name = String(m.ItemName || m.Name || '').toLowerCase();
+    const station = String(m.Station || '').toLowerCase();
+    const catName = String(catById[m.CategoryID]?.CategoryName || m.Category || '').toLowerCase();
+    const matchesSearch = !searchTerm || name.includes(searchTerm) || station.includes(searchTerm) || catName.includes(searchTerm);
+    const matchesCat = catFilter === 'ALL' || String(m.CategoryID) === String(catFilter);
+    return matchesSearch && matchesCat;
+  });
+
+  if ($('adminMenuCountBadge')) {
+    $('adminMenuCountBadge').textContent = `${filtered.length} of ${(state.menu || []).length} items`;
+  }
+
+  setHtml(tbody, filtered.length ? filtered.map(m => {
+    const id = m.MenuItemID || m.ItemID;
+    const name = m.ItemName || m.Name || 'Unnamed Item';
+    const price = resolveMenuPrice(m);
+    const isAvail = m.Available !== false && m.Available !== 'false';
+    return `<tr>
+      <td>${m.ImageURL ? `<img src="${escapeHtml(m.ImageURL)}" class="img-preview-thumb">` : `<div class="img-preview-thumb d-flex align-items-center justify-content-center text-muted"><i class="fa-solid fa-utensils"></i></div>`}</td>
+      <td><strong>${escapeHtml(name)}</strong></td>
+      <td>${escapeHtml(catById[m.CategoryID]?.CategoryName || m.Category || '')}</td>
+      <td><strong>${curr()}${price.toFixed(2)}</strong></td>
+      <td><span class="badge bg-dark">${escapeHtml(m.Station || 'Kitchen')}</span></td>
+      <td>${isAvail ? '<span class="badge bg-success">Available</span>' : '<span class="badge bg-danger">Unavailable</span>'}</td>
+      <td class="text-end text-nowrap">
+        <button class="btn btn-sm btn-outline-primary fw-bold me-1" onclick="editMenuItemById('${escapeHtml(id)}')"><i class="fa-solid fa-pen-to-square me-1"></i>Edit</button>
+        <button class="btn btn-sm btn-outline-danger fw-bold" onclick="deleteMenuItemById('${escapeHtml(id)}', '${escapeHtml(name)}')"><i class="fa-solid fa-trash me-1"></i>Delete</button>
+      </td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="7" class="text-center text-muted py-3">No menu items match your filter.</td></tr>`);
+}
+
+async function deleteCategoryById(catId, catName) {
+  if (!confirm(`Delete category "${catName}"?`)) return;
+  try {
+    showLoading(`Deleting category ${catName}…`);
+    const res = await callServer('deleteCategory', state.token, catId);
+    showDone(res.message || 'Category deleted!', async () => {
+      if ($('adminMenuCatFilter')?.value === catId) $('adminMenuCatFilter').value = 'ALL';
+      await loadBootstrap();
+    });
+  } catch (err) {
+    hideLoading();
+    toast(err.message, 'danger');
+  }
 }
 
 function resetTableForm() { $('cfgTableId').value = ''; $('cfgTableName').value = ''; $('cfgTableCapacity').value = 4; }
@@ -3141,22 +3479,17 @@ function populateAdminForms() {
   $('cfgReceiptFooter').value = state.settings.RECEIPT_FOOTER || '';
 
   const catList = state.categories || [];
-  $('cfgMenuCategory').innerHTML = catList.map(c => `<option value="${c.CategoryID}">${escapeHtml(c.CategoryName)}</option>`).join('');
-  const catById = {}; catList.forEach(c => { catById[c.CategoryID] = c; });
+  $('cfgMenuCategory').innerHTML = catList.map(c => `<option value="${escapeHtml(c.CategoryID)}">${escapeHtml(c.CategoryName)}</option>`).join('');
 
-  setHtml($('menuTableBody'), (state.menu || []).map(m => {
-    const id = m.MenuItemID || m.ItemID;
-    const name = m.ItemName || m.Name || 'Unnamed Item';
-    return `<tr>
-      <td>${m.ImageURL ? `<img src="${escapeHtml(m.ImageURL)}" class="img-preview-thumb">` : `<div class="img-preview-thumb d-flex align-items-center justify-content-center text-muted"><i class="fa-solid fa-utensils"></i></div>`}</td>
-      <td><strong>${escapeHtml(name)}</strong></td>
-      <td>${escapeHtml(catById[m.CategoryID]?.CategoryName || m.Category || '')}</td>
-      <td>${curr()}${Number(m.Price || 0).toFixed(2)}</td>
-      <td><span class="badge bg-dark">${escapeHtml(m.Station || 'Kitchen')}</span></td>
-      <td>${m.Available ? '<span class="badge bg-success">Available</span>' : '<span class="badge bg-danger">Unavailable</span>'}</td>
-      <td><button class="btn btn-sm btn-outline-primary fw-bold" onclick="editMenuItemById('${id}')">Edit</button></td>
-    </tr>`;
-  }).join(''));
+  const filterSel = $('adminMenuCatFilter');
+  if (filterSel) {
+    const prevFilter = filterSel.value || 'ALL';
+    filterSel.innerHTML = `<option value="ALL">All Categories</option>` +
+      catList.map(c => `<option value="${escapeHtml(c.CategoryID)}">${escapeHtml(c.CategoryName)}</option>`).join('');
+    filterSel.value = catList.some(c => String(c.CategoryID) === prevFilter) ? prevFilter : 'ALL';
+  }
+
+  renderAdminMenuTable();
 
   setHtml($('tablesTableBody'), (state.tables || []).map(t => `<tr>
     <td><strong>${escapeHtml(t.TableNumber)}</strong></td>
@@ -3168,7 +3501,20 @@ function populateAdminForms() {
     </td>
   </tr>`).join(''));
 
-  setHtml($('categoriesList'), catList.map(c => `<div class="d-flex justify-content-between border-bottom py-2"><div><strong>${escapeHtml(c.CategoryName)}</strong> <small class="text-muted">${escapeHtml(c.Description || '')}</small></div><span class="badge bg-info">Sort ${escapeHtml(c.SortOrder)}</span></div>`).join(''));
+  setHtml($('categoriesList'), catList.length ? catList.map(c => {
+    const itemCount = (state.menu || []).filter(m => String(m.CategoryID) === String(c.CategoryID)).length;
+    return `<div class="d-flex justify-content-between align-items-center border-bottom py-2">
+      <div>
+        <strong>${escapeHtml(c.CategoryName)}</strong>
+        <small class="text-muted ms-1">${escapeHtml(c.Description || '')}</small>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <span class="badge bg-light text-dark border">${itemCount} item${itemCount === 1 ? '' : 's'}</span>
+        <span class="badge bg-info">Sort ${escapeHtml(c.SortOrder)}</span>
+        <button class="btn btn-sm btn-outline-danger fw-bold" onclick="deleteCategoryById('${escapeHtml(c.CategoryID)}', '${escapeHtml(c.CategoryName)}')"><i class="fa-solid fa-trash me-1"></i>Delete</button>
+      </div>
+    </div>`;
+  }).join('') : '<div class="text-muted small py-2">No categories configured yet.</div>');
 
   const branchMap = {}; (state.branches || []).forEach(b => { branchMap[b.BranchID] = b.BranchName; });
   setHtml($('usersTableBody'), (state.users || []).map(u => `<tr>
@@ -3178,7 +3524,7 @@ function populateAdminForms() {
     <td>${escapeHtml(branchMap[u.BranchID] || (u.Role === 'Admin' ? 'All Branches' : 'Main'))}</td>
     <td>${u.Active ? '✓' : '✗'}</td>
     <td class="small text-muted">${u.LastLogin ? new Date(u.LastLogin).toLocaleString() : '—'}</td>
-    <td><button class="btn btn-sm btn-outline-primary" onclick="editUserRow('${u.UserID}')">Edit</button></td>
+    <td><button class="btn btn-sm btn-outline-primary" onclick="editUserRow('${escapeHtml(u.UserID)}')">Edit</button></td>
   </tr>`).join(''));
 }
 
@@ -3289,7 +3635,6 @@ function renderSalesReport(d) {
 
   $('reportSummary').innerHTML = `<div class="row g-2"><div class="col-6 col-md-3"><div class="stat-card bg-primary"><h6>Net Sales</h6><h4>${fmt(t.sales)}</h4></div></div><div class="col-6 col-md-3"><div class="stat-card bg-success"><h6>Paid Orders</h6><h4>${cn.paid || 0}</h4></div></div><div class="col-6 col-md-3"><div class="stat-card bg-warning"><h6>Avg Order</h6><h4>${fmt(d.averageOrderValue)}</h4></div></div><div class="col-6 col-md-3"><div class="stat-card bg-info"><h6>Items Sold</h6><h4>${t.items || 0}</h4></div></div></div>`;
 
-  // Cross-branch consolidated breakdown table
   const brWrap = $('reportBranchComparison');
   if (brWrap) {
     if (d.allBranches && (d.branchBreakdown || []).length) {
@@ -3346,20 +3691,92 @@ function exportSalesReportCsv() {
 
 async function loadEODReport() {
   try {
-    showLoading('Generating EOD report…');
-    const r = await callServer('getEndOfDayReport', state.token, $('eodDate').value || todayStr());
+    showLoading('Generating EOD Z-Reading report…');
+    const dateVal = $('eodDate').value || todayStr();
+    const openingFloat = getEodOpeningFloat();
+    const r = await callServer('getEndOfDayReport', state.token, dateVal, openingFloat);
     hideLoading(); window._lastEOD = r; state.eodGenerated = { date: r.date, at: Date.now() };
     const c = r.currency || '₱', fmt = n => c + Number(n || 0).toFixed(2);
-    $('eodReport').innerHTML = `<div class="border rounded p-4 bg-white shadow-sm mx-auto" id="eodPrintArea" style="max-width:480px;">
-      <div class="text-center border-bottom pb-2 mb-3"><h4 class="fw-bold mb-0">${escapeHtml(r.restaurantName)}</h4><div class="fw-semibold text-secondary">END OF DAY SALES REPORT</div><div class="small text-muted">Date: ${escapeHtml(r.date)}</div></div>
-      <div class="d-flex justify-content-between small mb-1"><span>Gross Subtotal:</span><span>${fmt(r.totals?.subtotal)}</span></div>
-      <div class="d-flex justify-content-between small mb-1 text-danger"><span>Discounts:</span><span>-${fmt(r.totals?.discount)}</span></div>
-      <div class="d-flex justify-content-between small mb-1"><span>Service Charges:</span><span>${fmt(r.totals?.serviceCharge)}</span></div>
-      <hr><div class="d-flex justify-content-between fs-5 fw-bold text-success"><span>NET TOTAL SALES:</span><span>${fmt(r.totals?.sales)}</span></div>
-      <div class="small border rounded p-2 mt-2"><div class="d-flex justify-content-between"><span>VATable Sales</span><span>${fmt(r.totals?.vatableSales)}</span></div><div class="d-flex justify-content-between"><span>VAT (12%)</span><span>${fmt(r.totals?.tax)}</span></div><div class="d-flex justify-content-between"><span>VAT-Exempt Sales</span><span>${fmt(r.totals?.vatExemptSales)}</span></div></div>
-    </div>`;
+    const row = (lbl, val, cls = '') => `<div style="display:flex; justify-content:space-between; margin-bottom:2px;" class="${cls}"><span>${lbl}</span><span>${val}</span></div>`;
+
+    const paymentRows = (r.paymentBreakdown || []).length
+      ? r.paymentBreakdown.map(p => row(`${escapeHtml(p.method)} (${p.count})`, fmt(p.total))).join('')
+      : '<div class="text-muted small">No paid transactions</div>';
+
+    const itemRows = (r.itemsSold || []).length
+      ? r.itemsSold.map(i => `<div style="display:flex; justify-content:space-between; margin-bottom:2px; font-size:0.78rem;"><span>${i.quantity}x ${escapeHtml(i.name)}</span><span>${fmt(i.total)}</span></div>`).join('')
+      : '<div class="text-muted small">No items sold</div>';
+
+    $('eodReport').innerHTML = `
+      <div class="border rounded p-4 bg-white shadow-sm mx-auto" id="eodPrintArea" style="max-width:440px; font-family:'Courier New', Courier, monospace; color:#000;">
+        <div style="text-align:center; border-bottom:2px dashed #000; padding-bottom:8px; margin-bottom:8px;">
+          <div style="font-weight:bold; font-size:1.1rem;">${escapeHtml(r.restaurantName)}</div>
+          <div style="font-size:0.8rem;">${escapeHtml(r.branchName)}</div>
+          ${r.branchAddress ? `<div style="font-size:0.75rem;">${escapeHtml(r.branchAddress)}</div>` : ''}
+          <div style="font-weight:bold; margin-top:4px;">*** Z-READING / END OF DAY ***</div>
+        </div>
+
+        <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
+          ${row('Z-Report #:', escapeHtml(r.reportNo))}
+          ${row('Business Date:', escapeHtml(r.date))}
+          ${row('Printed At:', escapeHtml(r.printedAt))}
+          ${row('Generated By:', escapeHtml(r.generatedBy))}
+        </div>
+
+        <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
+          <div style="font-weight:bold; margin-bottom:3px;">TRANSACTION SUMMARY</div>
+          ${row('Paid Orders:', r.counts?.paid || 0)}
+          ${row('Cancelled / Voided:', r.counts?.cancelled || 0)}
+          ${row('Open / Unpaid Orders:', r.counts?.open || 0)}
+          ${row('Total Items Sold:', r.counts?.itemsQty || 0)}
+        </div>
+
+        <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
+          <div style="font-weight:bold; margin-bottom:3px;">SALES &amp; DISCOUNTS</div>
+          ${row('Gross Subtotal:', fmt(r.totals?.subtotal))}
+          ${row('Less VAT (12%):', '-' + fmt(r.totals?.lessVat))}
+          ${row('SC/PWD &amp; Discounts:', '-' + fmt(r.totals?.discount))}
+          ${row('Service Charges:', fmt(r.totals?.serviceCharge))}
+          <div style="border-top:1px solid #000; margin:4px 0;"></div>
+          ${row('NET TOTAL SALES:', fmt(r.totals?.sales), 'fw-bold fs-6')}
+        </div>
+
+        <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
+          <div style="font-weight:bold; margin-bottom:3px;">PAYMENT METHOD BREAKDOWN</div>
+          ${paymentRows}
+        </div>
+
+        <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
+          <div style="font-weight:bold; margin-bottom:3px;">CASH DRAWER RECONCILIATION</div>
+          ${row('Opening Cash Float:', fmt(r.cashDrawer?.openingFloat))}
+          ${row('Cash Sales:', fmt(r.cashDrawer?.cashSales))}
+          ${row('Total Amount Tendered:', fmt(r.totalCollected))}
+          ${row('Total Change Given:', '-' + fmt(r.totalChange))}
+          <div style="border-top:1px solid #000; margin:4px 0;"></div>
+          ${row('Expected Cash in Drawer:', fmt(r.cashDrawer?.expectedCash), 'fw-bold')}
+        </div>
+
+        <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
+          <div style="font-weight:bold; margin-bottom:3px;">VAT BREAKDOWN (BIR)</div>
+          ${row('VATable Sales:', fmt(r.totals?.vatableSales))}
+          ${row('VAT Amount (12%):', fmt(r.totals?.tax))}
+          ${row('VAT-Exempt Sales:', fmt(r.totals?.vatExemptSales))}
+        </div>
+
+        <div style="font-size:0.8rem; border-bottom:2px dashed #000; padding-bottom:6px; margin-bottom:8px;">
+          <div style="font-weight:bold; margin-bottom:3px;">ITEMIZED PRODUCT SALES</div>
+          ${itemRows}
+        </div>
+
+        <div style="text-align:center; font-size:0.75rem; margin-top:8px;">
+          <div>__________________________</div>
+          <div>Manager / Cashier Signature</div>
+          <div style="margin-top:4px;">*** END OF Z-READING ***</div>
+        </div>
+      </div>`;
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
+
 function printEODReport() {
   const area = $('eodPrintArea');
   if (!area) return toast('Generate the report first.', 'warning');
@@ -3399,7 +3816,11 @@ async function triggerDbSetup() { toast('Database schema is managed in Supabase 
 window.addEventListener('load', async () => {
   $('loginVersion').textContent = APP_VERSION;
   syncPrintModeSelects();
-  if (await resumeSession()) await initSession();
+  if (!hasValidSupabaseCredentials()) {
+    openDbConfigModal();
+  } else if (await resumeSession()) {
+    await initSession();
+  }
 });
 </script>
 </body>
