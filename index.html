@@ -3,343 +3,397 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Multi-Branch Restaurant POS</title>
+  <title>Restaurant POS — Multi-Branch Edition</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+  </style>
 </head>
-<body class="bg-slate-100 text-slate-900 min-h-screen flex flex-col">
+<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col">
 
-  <!-- ==================== LOGIN SCREEN ==================== -->
-  <div id="loginScreen" class="fixed inset-0 z-50 bg-slate-900 flex items-center justify-center p-4">
+  <!-- LOGIN SCREEN -->
+  <div id="loginScreen" class="fixed inset-0 bg-slate-900/95 z-50 flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 space-y-6">
-      <div class="text-center">
-        <h1 class="text-2xl font-extrabold text-slate-900">Restaurant POS</h1>
-        <p class="text-xs text-slate-500 mt-1">Multi-Branch Point of Sale & Kitchen Display</p>
+      <div class="text-center space-y-1">
+        <div class="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-600 text-white font-extrabold text-xl mb-2">POS</div>
+        <h1 class="text-2xl font-bold text-slate-900">Restaurant POS</h1>
+        <p class="text-sm text-slate-500">Multi-Branch Operations &amp; KDS</p>
       </div>
       <form id="loginForm" onsubmit="handleLogin(event)" class="space-y-4">
         <div>
-          <label class="block text-xs font-bold text-slate-700 mb-1">Username</label>
-          <input type="text" id="loginUsername" required autocomplete="username" placeholder="admin"
-            class="w-full border border-slate-300 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:border-indigo-600" />
+          <label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Username</label>
+          <input id="loginUsername" type="text" required autocomplete="username" placeholder="e.g. admin"
+            class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-sm" />
         </div>
         <div>
-          <label class="block text-xs font-bold text-slate-700 mb-1">Password</label>
-          <input type="password" id="loginPassword" required autocomplete="current-password" placeholder="••••••••"
-            class="w-full border border-slate-300 rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:border-indigo-600" />
+          <label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Password</label>
+          <input id="loginPassword" type="password" required autocomplete="current-password" placeholder="••••••••"
+            class="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-sm" />
         </div>
-        <p id="loginError" class="text-xs font-medium text-rose-600 hidden"></p>
-        <button type="submit" id="btnLoginSubmit"
-          class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-lg text-sm transition">
+        <div id="loginError" class="hidden text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-2.5"></div>
+        <button id="btnLoginSubmit" type="submit"
+          class="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow transition text-sm">
           Sign In
         </button>
       </form>
     </div>
   </div>
 
-  <!-- ==================== TOP NAVIGATION BAR ==================== -->
-  <header id="appHeader" class="hidden bg-slate-900 text-white px-4 py-3 shadow-md">
-    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
-      <div class="flex items-center gap-3">
-        <span class="font-extrabold text-base tracking-tight">POS Terminal</span>
-        <div id="branchSwitcherContainer"></div>
-        <span id="liveSyncBadge" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-800 text-slate-400">
-          <span class="w-2 h-2 rounded-full bg-slate-500"></span> Offline
-        </span>
-      </div>
+  <!-- TOP NAVIGATION BAR -->
+  <header id="appHeader" class="hidden bg-slate-900 text-white px-4 py-2.5 shadow-md flex flex-wrap items-center justify-between gap-3">
+    <div class="flex items-center gap-3">
+      <span class="font-extrabold tracking-tight text-lg text-white">Resto<span class="text-indigo-400">POS</span></span>
+      <span id="realtimeBadge" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> LIVE
+      </span>
+      <!-- Branch Context Switcher (Admin dropdown / Staff badge) -->
+      <div id="branchSwitcherContainer" class="flex items-center gap-2"></div>
+      <button id="btnOpenBranchModal" onclick="openBranchManagerModal()" class="hidden text-xs bg-indigo-600 hover:bg-indigo-500 px-2.5 py-1 rounded font-semibold">
+        + Manage Branches
+      </button>
+    </div>
 
-      <!-- Navigation Tabs -->
-      <nav class="flex items-center gap-1.5 text-xs font-semibold">
-        <button onclick="switchTab('pos')" data-tab="pos" class="nav-tab px-3 py-1.5 rounded-lg bg-indigo-600 text-white">POS & Tables</button>
-        <button onclick="switchTab('kitchen')" data-tab="kitchen" class="nav-tab px-3 py-1.5 rounded-lg hover:bg-slate-800 text-slate-300">Kitchen / Bar</button>
-        <button onclick="switchTab('menu')" data-tab="menu" class="nav-tab px-3 py-1.5 rounded-lg hover:bg-slate-800 text-slate-300">Branch Menu</button>
-        <button onclick="switchTab('eod')" data-tab="eod" class="nav-tab px-3 py-1.5 rounded-lg hover:bg-slate-800 text-slate-300">End of Day</button>
-        <button id="navUsersBtn" onclick="switchTab('users')" data-tab="users" class="nav-tab hidden px-3 py-1.5 rounded-lg hover:bg-slate-800 text-slate-300">Staff</button>
-      </nav>
+    <nav class="flex items-center gap-1.5 bg-slate-800 p-1 rounded-lg text-xs font-semibold">
+      <button onclick="switchTab('pos')" data-tab="pos" class="tab-btn px-3 py-1.5 rounded-md bg-indigo-600 text-white">POS &amp; Tables</button>
+      <button onclick="switchTab('kds')" data-tab="kds" class="tab-btn px-3 py-1.5 rounded-md text-slate-300 hover:text-white">Kitchen / Bar KDS</button>
+      <button onclick="switchTab('menu')" data-tab="menu" class="tab-btn px-3 py-1.5 rounded-md text-slate-300 hover:text-white">Branch Menu</button>
+      <button onclick="switchTab('eod')" data-tab="eod" class="tab-btn px-3 py-1.5 rounded-md text-slate-300 hover:text-white">End of Day</button>
+      <button id="navUsersBtn" onclick="switchTab('users')" data-tab="users" class="hidden tab-btn px-3 py-1.5 rounded-md text-slate-300 hover:text-white">Users</button>
+    </nav>
 
-      <!-- Right Controls -->
-      <div class="flex items-center gap-2">
-        <button id="btnOpenBranchModal" onclick="openBranchManagerModal()"
-          class="hidden bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold px-3 py-1.5 rounded-lg">
-          Manage Branches
-        </button>
-        <span id="currentUserBadge" class="text-xs text-slate-300 font-medium"></span>
-        <button onclick="logoutUser()" class="bg-slate-800 hover:bg-rose-600 text-xs font-semibold px-3 py-1.5 rounded-lg">
-          Logout
-        </button>
+    <div class="flex items-center gap-3 text-xs">
+      <div class="text-right">
+        <div id="currentUserBadge" class="font-bold text-white"></div>
       </div>
+      <button onclick="logoutUser()" class="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 font-semibold text-white">Logout</button>
     </div>
   </header>
 
-  <!-- ==================== MAIN CONTENT ==================== -->
-  <main id="appMain" class="hidden flex-1 max-w-7xl w-full mx-auto p-4 space-y-6">
+  <!-- MAIN WORKSPACE -->
+  <main id="appMain" class="hidden flex-1 p-4 max-w-[1600px] w-full mx-auto">
 
     <!-- TAB 1: POS & TABLES -->
-    <section id="tab-pos" class="tab-panel grid grid-cols-1 lg:grid-cols-12 gap-5">
+    <section id="tab-pos" class="tab-panel grid grid-cols-1 lg:grid-cols-12 gap-4">
       <!-- Left: Tables & Menu -->
-      <div class="lg:col-span-7 space-y-4">
+      <div class="lg:col-span-8 space-y-4">
+        <!-- Tables Grid -->
         <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
           <div class="flex items-center justify-between mb-3">
-            <h2 class="text-sm font-bold text-slate-800">Tables</h2>
-            <button id="btnAddTable" onclick="promptAddTable()" class="hidden text-xs font-semibold text-indigo-600 hover:underline">+ Add Table</button>
+            <h2 class="font-bold text-slate-800 text-sm uppercase tracking-wider">Floor Tables</h2>
+            <div class="flex items-center gap-2">
+              <button onclick="selectTakeoutOrder()" class="text-xs px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-semibold">+ Takeout / Walk-In</button>
+              <button id="btnAddTable" onclick="promptAddTable()" class="hidden text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-semibold">+ Add Table</button>
+            </div>
           </div>
-          <div id="tablesGrid" class="grid grid-cols-3 sm:grid-cols-4 gap-2.5"></div>
+          <div id="tablesGrid" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5"></div>
         </div>
 
+        <!-- Menu Selection -->
         <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
-          <div class="flex items-center justify-between mb-3">
-            <h2 class="text-sm font-bold text-slate-800">Menu Items</h2>
-            <input type="text" id="menuSearchInput" oninput="renderPosMenu()" placeholder="Search menu..."
-              class="border border-slate-300 rounded-lg px-2.5 py-1 text-xs w-44" />
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <h2 class="font-bold text-slate-800 text-sm uppercase tracking-wider">Menu Items</h2>
+            <div class="flex items-center gap-2">
+              <select id="menuCategoryFilter" onchange="renderPosMenu()" class="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5">
+                <option value="ALL">All Categories</option>
+              </select>
+              <input id="menuSearchInput" oninput="renderPosMenu()" type="text" placeholder="Search item..."
+                class="text-xs border border-slate-300 rounded-lg px-3 py-1.5 w-44" />
+            </div>
           </div>
-          <div id="posMenuGrid" class="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[420px] overflow-y-auto"></div>
+          <div id="posMenuGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 max-h-[420px] overflow-y-auto scrollbar-thin pr-1"></div>
         </div>
       </div>
 
-      <!-- Right: Current Order & Checkout (PH Senior/PWD VAT Calculation) -->
-      <div class="lg:col-span-5 bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-col justify-between">
+      <!-- Right: Order Cart & Billing -->
+      <div class="lg:col-span-4 bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-col justify-between">
         <div class="space-y-3">
           <div class="flex items-center justify-between border-b border-slate-200 pb-2.5">
             <div>
-              <h2 class="text-sm font-bold text-slate-900" id="activeOrderTitle">New Take-Out Order</h2>
-              <p class="text-xs text-slate-500" id="activeOrderSubtitle">Select a table or add items</p>
+              <h2 id="orderPanelTitle" class="font-bold text-slate-900 text-base">Select a Table or Takeout</h2>
+              <p id="orderPanelSub" class="text-xs text-slate-500">No active order selected</p>
             </div>
-            <button onclick="resetOrderCart()" class="text-xs text-rose-600 hover:underline">Clear</button>
+            <button onclick="resetOrderCart()" class="text-xs text-slate-400 hover:text-rose-600 font-semibold">Clear</button>
           </div>
 
-          <div id="cartItemsList" class="divide-y divide-slate-100 max-h-64 overflow-y-auto text-sm"></div>
+          <!-- Cart Items -->
+          <div id="cartItemsList" class="space-y-2 max-h-[260px] overflow-y-auto scrollbar-thin pr-1 text-sm">
+            <p class="text-xs text-slate-400 text-center py-8">Tap menu items to add to order</p>
+          </div>
         </div>
 
-        <!-- Discount & Totals -->
-        <div class="border-t border-slate-200 pt-3 mt-4 space-y-3">
-          <div class="grid grid-cols-3 gap-2 text-xs">
+        <!-- Discounts & Totals -->
+        <div class="border-t border-slate-200 pt-3 mt-3 space-y-3 text-xs">
+          <div class="grid grid-cols-3 gap-2">
             <div>
-              <label class="block font-semibold text-slate-600 mb-1">Discount</label>
-              <select id="discountTypeSelect" onchange="recalculateCartTotals()" class="w-full border border-slate-300 rounded px-2 py-1.5">
+              <label class="block font-semibold text-slate-500 mb-1">Discount</label>
+              <select id="discountType" onchange="recalculateTotals()" class="w-full border border-slate-300 rounded-lg px-2 py-1.5">
                 <option value="None">None</option>
-                <option value="Senior">Senior Citizen (20%)</option>
+                <option value="Senior Citizen">Senior Citizen (20%)</option>
                 <option value="PWD">PWD (20%)</option>
               </select>
             </div>
             <div>
-              <label class="block font-semibold text-slate-600 mb-1">Total Pax</label>
-              <input type="number" id="totalPaxInput" min="1" value="1" onchange="recalculateCartTotals()"
-                class="w-full border border-slate-300 rounded px-2 py-1.5" />
+              <label class="block font-semibold text-slate-500 mb-1">Total Pax</label>
+              <input id="paxCount" type="number" min="1" value="1" oninput="recalculateTotals()"
+                class="w-full border border-slate-300 rounded-lg px-2 py-1.5" />
             </div>
             <div>
-              <label class="block font-semibold text-slate-600 mb-1">SC/PWD Pax</label>
-              <input type="number" id="discountPaxInput" min="0" value="0" onchange="recalculateCartTotals()"
-                class="w-full border border-slate-300 rounded px-2 py-1.5" />
+              <label class="block font-semibold text-slate-500 mb-1">SC/PWD Pax</label>
+              <input id="discountPax" type="number" min="0" value="0" oninput="recalculateTotals()"
+                class="w-full border border-slate-300 rounded-lg px-2 py-1.5" />
             </div>
           </div>
 
-          <div id="seniorIdFields" class="hidden grid grid-cols-2 gap-2 text-xs">
-            <input type="text" id="seniorIdNumber" placeholder="OSCA / PWD ID #" class="border border-slate-300 rounded px-2.5 py-1.5" />
-            <input type="text" id="seniorFullName" placeholder="Cardholder Name" class="border border-slate-300 rounded px-2.5 py-1.5" />
+          <div id="scPwdDetailsRow" class="hidden grid grid-cols-2 gap-2">
+            <input id="scPwdId" type="text" placeholder="SC / PWD ID Number" class="border border-slate-300 rounded-lg px-2.5 py-1.5" />
+            <input id="scPwdName" type="text" placeholder="Cardholder Full Name" class="border border-slate-300 rounded-lg px-2.5 py-1.5" />
           </div>
 
-          <div class="bg-slate-50 rounded-lg p-3 text-xs space-y-1">
-            <div class="flex justify-between"><span>Subtotal (VAT-Inclusive):</span><span id="lblSubtotal">₱0.00</span></div>
+          <div class="bg-slate-50 rounded-lg p-3 space-y-1 text-xs">
+            <div class="flex justify-between"><span>Gross Subtotal:</span><span id="lblSubtotal" class="font-semibold">₱0.00</span></div>
+            <div class="flex justify-between text-slate-500"><span>VATable Sales:</span><span id="lblVatable">₱0.00</span></div>
+            <div class="flex justify-between text-slate-500"><span>12% VAT:</span><span id="lblVat">₱0.00</span></div>
             <div class="flex justify-between text-slate-500"><span>VAT-Exempt Sales:</span><span id="lblVatExempt">₱0.00</span></div>
-            <div class="flex justify-between text-emerald-700"><span>20% SC/PWD Discount:</span><span id="lblDiscount">-₱0.00</span></div>
-            <div class="flex justify-between text-slate-500"><span>VATable Sales / 12% VAT:</span><span id="lblVatBreakdown">₱0.00 / ₱0.00</span></div>
-            <div class="flex justify-between text-base font-extrabold text-slate-900 border-t border-slate-200 pt-1.5">
+            <div class="flex justify-between text-emerald-600 font-semibold"><span>SC/PWD 20% Discount:</span><span id="lblDiscount">-₱0.00</span></div>
+            <div class="flex justify-between text-base font-extrabold text-slate-900 border-t border-slate-200 pt-1.5 mt-1">
               <span>Grand Total:</span><span id="lblGrandTotal">₱0.00</span>
             </div>
           </div>
 
           <div class="grid grid-cols-2 gap-2">
-            <button onclick="sendOrderToKitchen()" class="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-2.5 rounded-lg text-xs">
+            <button onclick="sendOrderToKitchen()" class="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-lg shadow-sm">
               Send to Kitchen
             </button>
-            <button onclick="settleCurrentOrder()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg text-xs">
-              Settle Payment
+            <button onclick="openCheckoutModal()" class="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg shadow-sm">
+              Settle &amp; Pay
             </button>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- TAB 2: KITCHEN / BAR DISPLAY -->
-    <section id="tab-kitchen" class="tab-panel hidden space-y-4">
-      <div class="flex items-center justify-between">
-        <h2 class="text-base font-bold text-slate-800">Active Kitchen & Bar Tickets</h2>
-        <button onclick="loadOpenOrders()" class="text-xs font-semibold text-indigo-600 hover:underline">Refresh Tickets</button>
+    <!-- TAB 2: KITCHEN / BAR KDS -->
+    <section id="tab-kds" class="hidden tab-panel space-y-4">
+      <div class="flex items-center justify-between bg-white p-4 rounded-xl border border-slate-200">
+        <div>
+          <h2 class="font-bold text-slate-900 text-base">Kitchen &amp; Bar Display System</h2>
+          <p class="text-xs text-slate-500">Live branch tickets filtered by station</p>
+        </div>
+        <div class="flex gap-2 text-xs font-semibold">
+          <button onclick="setKdsStation('ALL')" data-station="ALL" class="kds-filter-btn px-3 py-1.5 rounded-lg bg-indigo-600 text-white">All Stations</button>
+          <button onclick="setKdsStation('Kitchen')" data-station="Kitchen" class="kds-filter-btn px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700">Kitchen</button>
+          <button onclick="setKdsStation('Bar')" data-station="Bar" class="kds-filter-btn px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700">Bar</button>
+        </div>
       </div>
-      <div id="kitchenTicketsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+      <div id="kdsTicketsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
     </section>
 
-    <!-- TAB 3: BRANCH MENU AVAILABILITY & STOCK -->
-    <section id="tab-menu" class="tab-panel hidden bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-4">
-      <div class="flex items-center justify-between">
+    <!-- TAB 3: BRANCH MENU & STOCK -->
+    <section id="tab-menu" class="hidden tab-panel space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-2 bg-white p-4 rounded-xl border border-slate-200">
         <div>
-          <h2 class="text-base font-bold text-slate-900">Branch Menu Availability & Stock</h2>
-          <p class="text-xs text-slate-500">Toggle 86 / out-of-stock status or set stock counts for the active branch</p>
+          <h2 class="font-bold text-slate-900 text-base">Branch Menu Availability &amp; Pricing</h2>
+          <p class="text-xs text-slate-500">Toggle 86/Out-of-Stock status or set branch price overrides</p>
         </div>
-        <button id="btnAddMasterMenu" onclick="promptAddMasterMenuItem()" class="hidden bg-indigo-600 text-white text-xs font-semibold px-3 py-2 rounded-lg">
-          + New Master Item
+        <button id="btnAddMasterMenu" onclick="openAddMasterMenuModal()" class="hidden px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg">
+          + New Master Menu Item
         </button>
       </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-left text-sm border-collapse">
-          <thead class="bg-slate-100 text-xs uppercase text-slate-700">
+      <div class="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase">
             <tr>
-              <th class="px-4 py-2.5">Item</th>
-              <th class="px-4 py-2.5">Category</th>
-              <th class="px-4 py-2.5">Station</th>
-              <th class="px-4 py-2.5">Price</th>
-              <th class="px-4 py-2.5">Stock Qty</th>
-              <th class="px-4 py-2.5 text-right">Status</th>
+              <th class="p-3">Item Name</th>
+              <th class="p-3">Category</th>
+              <th class="p-3">Station</th>
+              <th class="p-3">Master Price</th>
+              <th class="p-3">Branch Override</th>
+              <th class="p-3">Effective Price</th>
+              <th class="p-3">Branch Available</th>
             </tr>
           </thead>
-          <tbody id="branchMenuTableBody" class="divide-y divide-slate-200"></tbody>
+          <tbody id="branchMenuTableBody" class="divide-y divide-slate-100"></tbody>
         </table>
       </div>
     </section>
 
-    <!-- TAB 4: END OF DAY REPORT -->
-    <section id="tab-eod" class="tab-panel hidden bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-4 max-w-2xl mx-auto">
-      <h2 class="text-base font-bold text-slate-900">Branch End-of-Day (Z-Reading)</h2>
-      <div id="eodSummaryBox" class="bg-slate-50 rounded-lg p-4 text-sm space-y-2 border border-slate-200"></div>
-      <div class="grid grid-cols-2 gap-3 text-xs">
+    <!-- TAB 4: END OF DAY (EOD) -->
+    <section id="tab-eod" class="hidden tab-panel max-w-2xl mx-auto bg-white rounded-xl border border-slate-200 p-6 space-y-4">
+      <h2 class="font-bold text-slate-900 text-lg">End of Day (Z-Reading &amp; Cash Count)</h2>
+      <div id="eodSummaryBox" class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs"></div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs pt-2">
         <div>
-          <label class="block font-semibold text-slate-700 mb-1">Opening Cash Drawer (₱)</label>
-          <input type="number" id="eodOpeningCash" value="0" step="0.01" class="w-full border border-slate-300 rounded-lg px-3 py-2" />
+          <label class="block font-semibold text-slate-600 mb-1">Opening Drawer Cash (₱)</label>
+          <input id="eodOpeningCash" type="number" step="0.01" value="0" oninput="updateEodExpected()" class="w-full border border-slate-300 rounded-lg px-3 py-2" />
         </div>
         <div>
-          <label class="block font-semibold text-slate-700 mb-1">Actual Cash Counted (₱)</label>
-          <input type="number" id="eodActualCash" value="0" step="0.01" class="w-full border border-slate-300 rounded-lg px-3 py-2" />
+          <label class="block font-semibold text-slate-600 mb-1">Actual Counted Cash (₱)</label>
+          <input id="eodActualCash" type="number" step="0.01" value="0" class="w-full border border-slate-300 rounded-lg px-3 py-2" />
         </div>
       </div>
-      <button onclick="submitEndOfDayReport()" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 rounded-lg text-xs">
-        Submit & Close Branch Day
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1">Shift Notes</label>
+        <input id="eodNotes" type="text" placeholder="Optional remarks..." class="w-full text-xs border border-slate-300 rounded-lg px-3 py-2" />
+      </div>
+      <button onclick="submitEodReport()" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-sm">
+        Submit End of Day Report
       </button>
     </section>
 
-    <!-- TAB 5: STAFF MANAGEMENT (PER BRANCH) -->
-    <section id="tab-users" class="tab-panel hidden bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-5">
-      <div>
-        <h2 class="text-base font-bold text-slate-900">Branch Staff & Authentication</h2>
-        <p class="text-xs text-slate-500">Global Admins can assign staff to any branch; Branch Managers are locked to their own branch.</p>
+    <!-- TAB 5: USERS MANAGEMENT -->
+    <section id="tab-users" class="hidden tab-panel grid grid-cols-1 lg:grid-cols-12 gap-4">
+      <div class="lg:col-span-4 bg-white rounded-xl border border-slate-200 p-4 space-y-3 h-fit">
+        <h2 id="userFormTitle" class="font-bold text-slate-900 text-sm uppercase">Add / Edit Staff User</h2>
+        <form id="userForm" onsubmit="handleUserFormSubmit(event)" class="space-y-3 text-xs">
+          <input id="editUserId" type="hidden" />
+          <div>
+            <label class="block font-semibold text-slate-600 mb-1">Full Name</label>
+            <input id="userFullName" type="text" required class="w-full border border-slate-300 rounded-lg px-3 py-2" />
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-600 mb-1">Username</label>
+            <input id="userUsername" type="text" required class="w-full border border-slate-300 rounded-lg px-3 py-2" />
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-600 mb-1">Role</label>
+            <select id="userRole" class="w-full border border-slate-300 rounded-lg px-3 py-2">
+              <option value="Cashier">Cashier</option>
+              <option value="Waiter">Waiter</option>
+              <option value="Kitchen">Kitchen</option>
+              <option value="Manager">Manager</option>
+              <option value="Admin">Admin</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-600 mb-1">Assigned Branch</label>
+            <select id="userBranchSelect" class="w-full border border-slate-300 rounded-lg px-3 py-2"></select>
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-600 mb-1">Password (min 6 chars)</label>
+            <input id="userPassword" type="password" placeholder="Leave blank when editing to keep current" class="w-full border border-slate-300 rounded-lg px-3 py-2" />
+          </div>
+          <label class="flex items-center gap-2 font-semibold text-slate-700">
+            <input id="userActive" type="checkbox" checked class="rounded" /> Active Account
+          </label>
+          <div class="flex gap-2 pt-1">
+            <button type="submit" class="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg">Save User</button>
+            <button type="button" onclick="resetUserForm()" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg">Reset</button>
+          </div>
+        </form>
       </div>
 
-      <form id="userForm" onsubmit="handleUserFormSubmit(event)" class="bg-slate-50 border border-slate-200 rounded-lg p-4 grid grid-cols-1 md:grid-cols-6 gap-3 items-end text-xs">
-        <input type="hidden" id="editUserId" value="" />
-        <div>
-          <label class="block font-semibold text-slate-700 mb-1">Full Name *</label>
-          <input type="text" id="userFullName" required class="w-full border border-slate-300 rounded-lg px-2.5 py-2 bg-white" />
-        </div>
-        <div>
-          <label class="block font-semibold text-slate-700 mb-1">Username *</label>
-          <input type="text" id="userUsername" required class="w-full border border-slate-300 rounded-lg px-2.5 py-2 bg-white" />
-        </div>
-        <div>
-          <label class="block font-semibold text-slate-700 mb-1">Role *</label>
-          <select id="userRole" class="w-full border border-slate-300 rounded-lg px-2.5 py-2 bg-white">
-            <option value="Cashier">Cashier</option>
-            <option value="Waiter">Waiter</option>
-            <option value="Kitchen">Kitchen</option>
-            <option value="Manager">Manager</option>
-            <option value="Admin" id="optAdminRole">Admin</option>
-          </select>
-        </div>
-        <div>
-          <label class="block font-semibold text-slate-700 mb-1">Assigned Branch *</label>
-          <select id="userBranchSelect" class="w-full border border-slate-300 rounded-lg px-2.5 py-2 bg-white"></select>
-        </div>
-        <div>
-          <label class="block font-semibold text-slate-700 mb-1">Password</label>
-          <input type="password" id="userPassword" placeholder="Min 6 chars" class="w-full border border-slate-300 rounded-lg px-2.5 py-2 bg-white" />
-        </div>
-        <div class="flex gap-1.5">
-          <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded-lg">Save</button>
-          <button type="button" onclick="resetUserForm()" class="px-2.5 py-2 border border-slate-300 rounded-lg bg-white">Clear</button>
-        </div>
-      </form>
-
-      <div class="overflow-x-auto">
-        <table class="w-full text-left text-sm border-collapse">
-          <thead class="bg-slate-100 text-xs uppercase text-slate-700">
+      <div class="lg:col-span-8 bg-white rounded-xl border border-slate-200 overflow-x-auto">
+        <table class="w-full text-left text-xs">
+          <thead class="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase">
             <tr>
-              <th class="px-4 py-2.5">Full Name</th>
-              <th class="px-4 py-2.5">Username</th>
-              <th class="px-4 py-2.5">Role</th>
-              <th class="px-4 py-2.5">Branch</th>
-              <th class="px-4 py-2.5">Status</th>
-              <th class="px-4 py-2.5 text-right">Actions</th>
+              <th class="p-3">Full Name</th>
+              <th class="p-3">Username</th>
+              <th class="p-3">Role</th>
+              <th class="p-3">Branch</th>
+              <th class="p-3">Status</th>
+              <th class="p-3">Action</th>
             </tr>
           </thead>
-          <tbody id="usersTableBody" class="divide-y divide-slate-200"></tbody>
+          <tbody id="usersTableBody" class="divide-y divide-slate-100"></tbody>
         </table>
       </div>
     </section>
+
   </main>
 
-  <!-- ==================== GLOBAL ADMIN BRANCH MANAGEMENT MODAL ==================== -->
-  <div id="branchManagerModal" class="fixed inset-0 z-50 hidden bg-black/60 flex items-center justify-center p-4">
-    <div class="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
-      <div class="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
-        <div>
-          <h3 class="text-base font-bold">Branch Management</h3>
-          <p class="text-xs text-slate-300">Create, edit, or activate/deactivate store branches</p>
-        </div>
-        <button onclick="closeBranchManagerModal()" class="text-slate-300 hover:text-white text-xl leading-none">&times;</button>
+  <!-- CHECKOUT MODAL -->
+  <div id="checkoutModal" class="hidden fixed inset-0 bg-slate-900/70 z-40 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+      <h3 class="text-lg font-bold text-slate-900">Settle Payment</h3>
+      <div class="bg-slate-50 p-3 rounded-lg flex justify-between items-center">
+        <span class="text-xs font-semibold text-slate-500">Total Amount Due</span>
+        <span id="modalTotalDue" class="text-xl font-extrabold text-indigo-600">₱0.00</span>
       </div>
-
-      <div class="p-6 overflow-y-auto space-y-6">
-        <form id="branchForm" onsubmit="handleBranchFormSubmit(event)" class="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-4">
-          <div class="flex items-center justify-between">
-            <span id="branchFormTitle" class="text-sm font-bold text-slate-800">Add New Branch</span>
-            <button type="button" id="btnCancelBranchEdit" onclick="resetBranchForm()" class="hidden text-xs text-slate-500 underline">Cancel Edit</button>
-          </div>
-          <input type="hidden" id="editBranchId" value="" />
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
-              <label class="block text-xs font-semibold text-slate-700 mb-1">Branch Name *</label>
-              <input type="text" id="inputBranchName" required placeholder="Gensan Highway Branch" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-700 mb-1">Branch Code *</label>
-              <input type="text" id="inputBranchCode" required maxlength="12" placeholder="GSHW" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm uppercase" />
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-700 mb-1">Status</label>
-              <select id="inputBranchActive" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white">
-                <option value="true">Active</option>
-                <option value="false">Inactive</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">Address</label>
-            <input type="text" id="inputBranchAddress" placeholder="National Highway, General Santos City" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
-          </div>
-          <div class="flex items-center justify-between">
-            <span id="branchFormStatus" class="text-xs font-medium text-rose-600"></span>
-            <button type="submit" id="btnSaveBranch" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-lg">Save Branch</button>
-          </div>
-        </form>
-
-        <div class="border border-slate-200 rounded-lg overflow-hidden">
-          <table class="w-full text-left border-collapse text-sm">
-            <thead class="bg-slate-100 text-slate-700 text-xs uppercase">
-              <tr>
-                <th class="px-4 py-2.5">Code</th>
-                <th class="px-4 py-2.5">Branch Name</th>
-                <th class="px-4 py-2.5">Address</th>
-                <th class="px-4 py-2.5">Status</th>
-                <th class="px-4 py-2.5 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="branchesTableBody" class="divide-y divide-slate-200 bg-white"></tbody>
-          </table>
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block font-semibold text-slate-600 mb-1">Payment Method</label>
+          <select id="paymentMethod" class="w-full border border-slate-300 rounded-lg px-3 py-2">
+            <option value="Cash">Cash</option>
+            <option value="GCash">GCash</option>
+            <option value="Maya">Maya</option>
+            <option value="Card">Credit / Debit Card</option>
+          </select>
         </div>
+        <div>
+          <label class="block font-semibold text-slate-600 mb-1">Amount Tendered (₱)</label>
+          <input id="amountTendered" type="number" step="0.01" oninput="updateChangeDue()" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold" />
+        </div>
+        <div class="flex justify-between text-sm font-bold text-emerald-700 pt-1">
+          <span>Change Due:</span><span id="modalChangeDue">₱0.00</span>
+        </div>
+      </div>
+      <div class="flex gap-2 pt-2">
+        <button onclick="closeCheckoutModal()" class="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-bold">Cancel</button>
+        <button onclick="confirmPayment()" class="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold">Confirm Payment</button>
       </div>
     </div>
   </div>
 
-  <!-- ==================== APPLICATION LOGIC ==================== -->
+  <!-- BRANCH MANAGER MODAL (GLOBAL ADMIN) -->
+  <div id="branchManagerModal" class="hidden fixed inset-0 bg-slate-900/70 z-40 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-xl max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-200 pb-3">
+        <h3 class="text-lg font-bold text-slate-900">Manage Branches</h3>
+        <button onclick="closeBranchManagerModal()" class="text-slate-400 hover:text-slate-700 font-bold text-sm">✕</button>
+      </div>
+      <form onsubmit="saveBranchForm(event)" class="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs bg-slate-50 p-3 rounded-xl">
+        <input id="editBranchId" type="hidden" />
+        <input id="branchNameInput" type="text" required placeholder="Branch Name (e.g. Gensan Highway)" class="border border-slate-300 rounded-lg px-2.5 py-2" />
+        <input id="branchCodeInput" type="text" required placeholder="Code (e.g. GENSAN-2)" class="border border-slate-300 rounded-lg px-2.5 py-2 uppercase" />
+        <input id="branchAddressInput" type="text" placeholder="Address" class="border border-slate-300 rounded-lg px-2.5 py-2" />
+        <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg px-3 py-2">Save Branch</button>
+      </form>
+      <div id="branchesModalList" class="divide-y divide-slate-100 text-xs"></div>
+    </div>
+  </div>
+
+  <!-- NEW MASTER MENU ITEM MODAL -->
+  <div id="masterMenuModal" class="hidden fixed inset-0 bg-slate-900/70 z-40 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 shadow-xl">
+      <h3 class="text-lg font-bold text-slate-900">Add Master Menu Item</h3>
+      <form onsubmit="saveMasterMenuItem(event)" class="space-y-3 text-xs">
+        <div>
+          <label class="block font-semibold text-slate-600 mb-1">Item Name</label>
+          <input id="newMenuName" type="text" required class="w-full border border-slate-300 rounded-lg px-3 py-2" />
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block font-semibold text-slate-600 mb-1">Category</label>
+            <input id="newMenuCategory" type="text" required value="Main Course" class="w-full border border-slate-300 rounded-lg px-3 py-2" />
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-600 mb-1">Station</label>
+            <select id="newMenuStation" class="w-full border border-slate-300 rounded-lg px-3 py-2">
+              <option value="Kitchen">Kitchen</option>
+              <option value="Bar">Bar</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-600 mb-1">Master Price (₱)</label>
+          <input id="newMenuPrice" type="number" step="0.01" required class="w-full border border-slate-300 rounded-lg px-3 py-2" />
+        </div>
+        <div class="flex gap-2 pt-2">
+          <button type="button" onclick="document.getElementById('masterMenuModal').classList.add('hidden')" class="flex-1 py-2 bg-slate-100 rounded-lg font-bold">Cancel</button>
+          <button type="submit" class="flex-1 py-2 bg-indigo-600 text-white rounded-lg font-bold">Create Item</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script>
-    // REPLACE THESE WITH YOUR SUPABASE PROJECT CREDENTIALS
+    // =========================================================================
+    // REPLACE WITH YOUR REAL SUPABASE PROJECT URL & ANON KEY
+    // =========================================================================
     const SUPABASE_URL = 'YOUR_SUPABASE_URL';
     const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 
@@ -358,9 +412,31 @@
     let selectedTable = null;
     let activeOrderId = null;
     let cart = [];
+    let kdsStationFilter = 'ALL';
     let branchRealtimeChannel = null;
+    let eodComputed = { cashSales: 0, nonCashSales: 0, discounts: 0, vatExempt: 0, vatable: 0, vat: 0 };
+
+    function escapeHtml(str) {
+      return String(str ?? '').replace(/[&<>"']/g, s => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[s]));
+    }
+
+    function showLoginStatus(msg, isError = true) {
+      const errEl = document.getElementById('loginError');
+      if (!errEl) return;
+      errEl.textContent = msg;
+      errEl.className = isError
+        ? 'text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-2.5'
+        : 'text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg p-2.5';
+      errEl.classList.remove('hidden');
+    }
 
     function createSupabaseClient(token) {
+      if (!window.supabase) {
+        throw new Error('Supabase JS library failed to load. Check your internet connection.');
+      }
+      if (!SUPABASE_URL.startsWith('http') || SUPABASE_ANON_KEY === 'YOUR_SUPABASE_ANON_KEY') {
+        throw new Error('Please replace YOUR_SUPABASE_URL and YOUR_SUPABASE_ANON_KEY in index.html first.');
+      }
       return window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         global: {
           headers: token ? { 'x-pos-token': token } : {}
@@ -368,17 +444,21 @@
       });
     }
 
-    // Initialize client on load
-    supabase = createSupabaseClient(posToken);
+    // Boot check on page load
     (async function boot() {
-      const savedUser = localStorage.getItem('pos_user');
-      if (posToken && savedUser) {
-        try {
+      try {
+        supabase = createSupabaseClient(posToken);
+        const savedUser = localStorage.getItem('pos_user');
+        if (posToken && savedUser) {
           currentUser = JSON.parse(savedUser);
           await enterApp();
-        } catch (_) {
-          logoutUser();
         }
+      } catch (err) {
+        localStorage.removeItem('pos_token');
+        localStorage.removeItem('pos_user');
+        posToken = '';
+        currentUser = null;
+        showLoginStatus(err.message || 'Ready to sign in.', true);
       }
     })();
 
@@ -386,12 +466,13 @@
     async function handleLogin(e) {
       e.preventDefault();
       const btn = document.getElementById('btnLoginSubmit');
-      const errEl = document.getElementById('loginError');
-      errEl.classList.add('hidden');
       btn.disabled = true;
       btn.textContent = 'Signing in...';
+      showLoginStatus('Authenticating with Supabase...', false);
 
       try {
+        if (!supabase) supabase = createSupabaseClient('');
+
         const username = document.getElementById('loginUsername').value.trim();
         const password = document.getElementById('loginPassword').value;
 
@@ -400,7 +481,7 @@
           p_password: password
         });
 
-        if (error) throw error;
+        if (error) throw new Error(`RPC Error: ${error.message}`);
         if (!data || !data.success) {
           throw new Error(data?.message || 'Invalid username or password.');
         }
@@ -411,10 +492,11 @@
         localStorage.setItem('pos_user', JSON.stringify(currentUser));
         supabase = createSupabaseClient(posToken);
 
+        showLoginStatus('Login verified! Loading branch workspace...', false);
         await enterApp();
       } catch (err) {
-        errEl.textContent = err.message || 'Login failed.';
-        errEl.classList.remove('hidden');
+        console.error('Login failure:', err);
+        showLoginStatus(err.message || 'Login failed. Open F12 Console for details.', true);
       } finally {
         btn.disabled = false;
         btn.textContent = 'Sign In';
@@ -426,7 +508,7 @@
       localStorage.removeItem('pos_user');
       posToken = '';
       currentUser = null;
-      if (branchRealtimeChannel) supabase.removeChannel(branchRealtimeChannel);
+      if (branchRealtimeChannel && supabase) supabase.removeChannel(branchRealtimeChannel);
       location.reload();
     }
 
@@ -452,18 +534,19 @@
 
     // -------------------- BRANCH CONTEXT & SWITCHER --------------------
     async function initBranchContext() {
-      const { data: branches } = await supabase
+      const { data: branches, error } = await supabase
         .from('branches')
         .select('*')
         .eq('Active', true)
         .order('BranchName', { ascending: true });
 
+      if (error) console.warn('Branches load warning:', error.message);
       allBranches = branches || [];
       const container = document.getElementById('branchSwitcherContainer');
 
       if (currentUser.role !== 'Admin') {
-        activeBranchId = currentUser.branchId;
-        container.innerHTML = `<span class="bg-slate-800 text-amber-300 px-2.5 py-1 rounded text-xs font-bold">${escapeHtml(currentUser.branchName)}</span>`;
+        activeBranchId = currentUser.branchId || 'branch-main';
+        container.innerHTML = `<span class="bg-slate-800 text-amber-300 px-2.5 py-1 rounded text-xs font-bold">${escapeHtml(currentUser.branchName || 'Main Branch')}</span>`;
         return;
       }
 
@@ -471,11 +554,11 @@
       const valid = allBranches.find(b => b.BranchID === savedBranch);
       activeBranchId = valid ? valid.BranchID : (allBranches[0]?.BranchID || 'branch-main');
 
-      container.innerHTML = `
-        <select onchange="switchActiveBranch(this.value)" class="bg-slate-800 text-white text-xs font-bold px-2.5 py-1 rounded border border-slate-600">
-          ${allBranches.map(b => `<option value="${b.BranchID}" ${b.BranchID === activeBranchId ? 'selected' : ''}>${escapeHtml(b.BranchName)} (${escapeHtml(b.BranchCode)})</option>`).join('')}
-        </select>
-      `;
+      container.innerHTML = allBranches.length
+        ? `<select onchange="switchActiveBranch(this.value)" class="bg-slate-800 text-white text-xs font-bold px-2.5 py-1 rounded border border-slate-600">
+            ${allBranches.map(b => `<option value="${b.BranchID}" ${b.BranchID === activeBranchId ? 'selected' : ''}>${escapeHtml(b.BranchName)} (${escapeHtml(b.BranchCode)})</option>`).join('')}
+          </select>`
+        : `<span class="bg-slate-800 text-amber-300 px-2.5 py-1 rounded text-xs font-bold">Main Branch</span>`;
     }
 
     async function switchActiveBranch(newBranchId) {
@@ -487,171 +570,181 @@
     }
 
     async function reloadAllBranchData() {
-      await Promise.all([
-        loadTables(),
-        loadBranchMenu(),
-        loadOpenOrders(),
-        loadEodPreview(),
-        ['Admin', 'Manager'].includes(currentUser.role) ? loadUsers() : Promise.resolve()
-      ]);
+      const tasks = [
+        loadTables().catch(e => console.warn('Tables load:', e.message)),
+        loadBranchMenu().catch(e => console.warn('Menu load:', e.message)),
+        loadOpenOrders().catch(e => console.warn('Orders load:', e.message)),
+        loadEodPreview().catch(e => console.warn('EOD load:', e.message))
+      ];
+      if (['Admin', 'Manager'].includes(currentUser.role)) {
+        tasks.push(loadUsers().catch(e => console.warn('Users load:', e.message)));
+      }
+      await Promise.all(tasks);
       populateUserBranchSelect();
     }
 
-    // -------------------- REALTIME SUBSCRIPTIONS --------------------
     async function subscribeBranchRealtime(branchId) {
-      if (branchRealtimeChannel) {
-        await supabase.removeChannel(branchRealtimeChannel);
-        branchRealtimeChannel = null;
-      }
-      if (!branchId) return;
-
+      if (branchRealtimeChannel) await supabase.removeChannel(branchRealtimeChannel);
       branchRealtimeChannel = supabase
         .channel(`pos-branch-${branchId}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `BranchID=eq.${branchId}` }, () => {
-          loadOpenOrders();
-          loadEodPreview();
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items', filter: `BranchID=eq.${branchId}` }, () => {
-          loadOpenOrders();
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurant_tables', filter: `BranchID=eq.${branchId}` }, () => {
-          loadTables();
-        })
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'branch_menu_items', filter: `BranchID=eq.${branchId}` }, () => {
-          loadBranchMenu();
-        })
-        .subscribe((status) => {
-          const badge = document.getElementById('liveSyncBadge');
-          if (status === 'SUBSCRIBED') {
-            badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-700';
-            badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> LIVE`;
-          } else {
-            badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-800 text-slate-400';
-            badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-slate-500"></span> Syncing`;
-          }
-        });
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurant_tables', filter: `BranchID=eq.${branchId}` }, () => loadTables())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `BranchID=eq.${branchId}` }, () => { loadOpenOrders(); loadEodPreview(); })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items', filter: `BranchID=eq.${branchId}` }, () => loadOpenOrders())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'branch_menu_items', filter: `BranchID=eq.${branchId}` }, () => loadBranchMenu())
+        .subscribe();
     }
 
     // -------------------- TABS --------------------
     function switchTab(tabName) {
-      document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+      document.querySelectorAll('.tab-panel').forEach(el => el.classList.add('hidden'));
       document.getElementById(`tab-${tabName}`).classList.remove('hidden');
-      document.querySelectorAll('.nav-tab').forEach(b => {
-        const active = b.dataset.tab === tabName;
-        b.className = active
-          ? 'nav-tab px-3 py-1.5 rounded-lg bg-indigo-600 text-white'
-          : 'nav-tab px-3 py-1.5 rounded-lg hover:bg-slate-800 text-slate-300';
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        const active = btn.dataset.tab === tabName;
+        btn.className = active
+          ? 'tab-btn px-3 py-1.5 rounded-md bg-indigo-600 text-white'
+          : 'tab-btn px-3 py-1.5 rounded-md text-slate-300 hover:text-white';
       });
     }
 
-    // -------------------- TABLES & POS ORDERS --------------------
+    // -------------------- TABLES & POS --------------------
     async function loadTables() {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('restaurant_tables')
         .select('*')
         .eq('BranchID', activeBranchId)
         .order('TableNumber', { ascending: true });
+      if (error) throw error;
       branchTables = data || [];
       renderTables();
     }
 
     function renderTables() {
       const grid = document.getElementById('tablesGrid');
+      if (!branchTables.length) {
+        grid.innerHTML = `<p class="col-span-full text-xs text-slate-400">No tables configured for this branch.</p>`;
+        return;
+      }
       grid.innerHTML = branchTables.map(t => {
-        const occupied = t.Status !== 'Available';
-        const selected = selectedTable?.TableID === t.TableID;
-        const style = selected
-          ? 'border-indigo-600 bg-indigo-50 ring-2 ring-indigo-500'
-          : occupied
-            ? 'border-amber-400 bg-amber-50'
-            : 'border-slate-200 bg-white hover:border-indigo-400';
+        const occupied = t.Status === 'Occupied';
+        const isSelected = selectedTable && selectedTable.TableID === t.TableID;
         return `
-          <button onclick="selectTable('${t.TableID}')" class="border rounded-lg p-3 text-left transition ${style}">
-            <div class="font-extrabold text-sm text-slate-900">${escapeHtml(t.TableNumber)}</div>
-            <div class="text-[11px] ${occupied ? 'text-amber-700 font-semibold' : 'text-emerald-700'}">${t.Status}</div>
+          <button onclick="selectTable('${t.TableID}')"
+            class="p-3 rounded-xl border text-left transition ${isSelected ? 'ring-2 ring-indigo-600 border-indigo-600' : 'border-slate-200'} ${occupied ? 'bg-rose-50' : 'bg-emerald-50/60 hover:bg-emerald-50'}">
+            <div class="flex justify-between items-center">
+              <span class="font-extrabold text-sm text-slate-900">${escapeHtml(t.TableNumber)}</span>
+              <span class="text-[10px] font-bold px-1.5 py-0.5 rounded ${occupied ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'}">${escapeHtml(t.Status)}</span>
+            </div>
+            <div class="text-[11px] text-slate-500 mt-1">${t.Capacity} Pax</div>
           </button>
         `;
       }).join('');
     }
 
-    async function selectTable(tableId) {
-      selectedTable = branchTables.find(t => t.TableID === tableId) || null;
-      renderTables();
-      if (!selectedTable) return;
-
-      document.getElementById('activeOrderTitle').textContent = `Table ${selectedTable.TableNumber}`;
-      if (selectedTable.CurrentOrderID) {
-        activeOrderId = selectedTable.CurrentOrderID;
-        const { data: items } = await supabase
-          .from('order_items')
-          .select('*')
-          .eq('OrderID', activeOrderId);
-        cart = (items || []).map(i => ({
-          itemId: i.ItemID,
-          name: i.ItemName,
-          station: i.Station,
-          price: Number(i.UnitPrice),
-          qty: Number(i.Qty),
-          persisted: true
-        }));
-        document.getElementById('activeOrderSubtitle').textContent = `Active Order #${activeOrderId.slice(0, 8)}`;
-      } else {
-        activeOrderId = null;
-        cart = [];
-        document.getElementById('activeOrderSubtitle').textContent = 'New Dine-In Order';
-      }
-      renderCart();
-    }
-
-    function resetOrderCart() {
-      selectedTable = null;
-      activeOrderId = null;
-      cart = [];
-      document.getElementById('activeOrderTitle').textContent = 'New Take-Out Order';
-      document.getElementById('activeOrderSubtitle').textContent = 'Select a table or add items';
-      document.getElementById('discountTypeSelect').value = 'None';
-      document.getElementById('totalPaxInput').value = 1;
-      document.getElementById('discountPaxInput').value = 0;
-      renderTables();
-      renderCart();
-    }
-
     async function promptAddTable() {
-      const num = prompt('Enter Table Number (e.g., T5):');
-      if (!num) return;
-      await supabase.from('restaurant_tables').insert({
+      const num = prompt('Enter Table Number (e.g. T-05):');
+      if (!num || !num.trim()) return;
+      const cap = parseInt(prompt('Enter Seating Capacity:', '4') || '4', 10);
+      const { error } = await supabase.from('restaurant_tables').insert({
         TableID: crypto.randomUUID(),
         BranchID: activeBranchId,
         TableNumber: num.trim(),
-        Capacity: 4,
+        Capacity: isNaN(cap) ? 4 : cap,
         Status: 'Available'
       });
+      if (error) return alert(error.message);
       await loadTables();
     }
 
-    // -------------------- BRANCH MENU & CART --------------------
+    async function selectTable(tableId) {
+      selectedTable = branchTables.find(t => t.TableID === tableId) || null;
+      if (!selectedTable) return;
+      renderTables();
+
+      document.getElementById('orderPanelTitle').textContent = `Table ${selectedTable.TableNumber}`;
+      if (selectedTable.CurrentOrderID) {
+        activeOrderId = selectedTable.CurrentOrderID;
+        document.getElementById('orderPanelSub').textContent = `Active Order #${activeOrderId.slice(0, 8)}`;
+        await loadExistingOrderIntoCart(activeOrderId);
+      } else {
+        activeOrderId = null;
+        cart = [];
+        document.getElementById('orderPanelSub').textContent = 'New Dine-In Order';
+        renderCart();
+      }
+    }
+
+    function selectTakeoutOrder() {
+      selectedTable = null;
+      activeOrderId = null;
+      cart = [];
+      renderTables();
+      document.getElementById('orderPanelTitle').textContent = 'Takeout / Walk-In';
+      document.getElementById('orderPanelSub').textContent = 'New Takeout Ticket';
+      renderCart();
+    }
+
+    async function loadExistingOrderIntoCart(orderId) {
+      const { data: order } = await supabase.from('orders').select('*').eq('OrderID', orderId).single();
+      const { data: items } = await supabase.from('order_items').select('*').eq('OrderID', orderId);
+      if (order) {
+        document.getElementById('discountType').value = order.DiscountType || 'None';
+        document.getElementById('paxCount').value = order.PaxCount || 1;
+        document.getElementById('discountPax').value = order.DiscountPax || 0;
+        document.getElementById('scPwdId').value = order.SeniorPwdId || '';
+        document.getElementById('scPwdName').value = order.SeniorPwdName || '';
+      }
+      cart = (items || []).map(i => ({
+        orderItemId: i.OrderItemID,
+        itemId: i.ItemID,
+        name: i.ItemName,
+        station: i.Station,
+        qty: i.Qty,
+        price: Number(i.UnitPrice),
+        sent: true
+      }));
+      renderCart();
+    }
+
+    // -------------------- MENU --------------------
     async function loadBranchMenu() {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('v_branch_menu')
         .select('*')
         .eq('BranchID', activeBranchId)
-        .order('Category', { ascending: true })
         .order('Name', { ascending: true });
+      if (error) throw error;
       branchMenu = data || [];
+
+      const cats = ['ALL', ...new Set(branchMenu.map(i => i.Category).filter(Boolean))];
+      const filterEl = document.getElementById('menuCategoryFilter');
+      const prev = filterEl.value;
+      filterEl.innerHTML = cats.map(c => `<option value="${escapeHtml(c)}">${c === 'ALL' ? 'All Categories' : escapeHtml(c)}</option>`).join('');
+      if (cats.includes(prev)) filterEl.value = prev;
+
       renderPosMenu();
       renderBranchMenuTable();
     }
 
     function renderPosMenu() {
-      const q = (document.getElementById('menuSearchInput').value || '').toLowerCase();
-      const filtered = branchMenu.filter(m => m.Name.toLowerCase().includes(q) || m.Category.toLowerCase().includes(q));
-      document.getElementById('posMenuGrid').innerHTML = filtered.map(m => `
+      const cat = document.getElementById('menuCategoryFilter').value;
+      const q = document.getElementById('menuSearchInput').value.trim().toLowerCase();
+      const filtered = branchMenu.filter(m =>
+        (cat === 'ALL' || m.Category === cat) &&
+        (!q || m.Name.toLowerCase().includes(q))
+      );
+
+      const grid = document.getElementById('posMenuGrid');
+      grid.innerHTML = filtered.map(m => `
         <button onclick="addToCart('${m.ItemID}')" ${!m.IsAvailable ? 'disabled' : ''}
-          class="border rounded-lg p-3 text-left transition ${m.IsAvailable ? 'bg-white hover:border-indigo-500 border-slate-200' : 'bg-slate-100 border-slate-200 opacity-50 cursor-not-allowed'}">
-          <div class="text-[10px] font-bold uppercase text-indigo-600">${escapeHtml(m.Category)}</div>
-          <div class="font-bold text-xs text-slate-900 mt-0.5 line-clamp-1">${escapeHtml(m.Name)}</div>
-          <div class="text-xs font-extrabold text-slate-800 mt-1.5">₱${Number(m.EffectivePrice).toFixed(2)}</div>
-          ${!m.IsAvailable ? '<span class="text-[10px] font-bold text-rose-600">86 / Out of Stock</span>' : ''}
+          class="p-3 rounded-xl border text-left transition flex flex-col justify-between ${m.IsAvailable ? 'border-slate-200 hover:border-indigo-500 bg-white' : 'border-slate-100 bg-slate-50 opacity-50 cursor-not-allowed'}">
+          <div>
+            <div class="text-[10px] font-bold uppercase text-indigo-600">${escapeHtml(m.Category)}</div>
+            <div class="font-bold text-xs text-slate-900 mt-0.5 line-clamp-2">${escapeHtml(m.Name)}</div>
+          </div>
+          <div class="flex items-center justify-between mt-2 pt-2 border-t border-slate-100">
+            <span class="font-extrabold text-xs text-slate-800">₱${Number(m.EffectivePrice).toFixed(2)}</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">${m.IsAvailable ? m.Station : '86 / Out'}</span>
+          </div>
         </button>
       `).join('');
     }
@@ -659,7 +752,7 @@
     function addToCart(itemId) {
       const item = branchMenu.find(m => m.ItemID === itemId);
       if (!item || !item.IsAvailable) return;
-      const existing = cart.find(c => c.itemId === itemId && !c.persisted);
+      const existing = cart.find(c => c.itemId === itemId && !c.sent);
       if (existing) {
         existing.qty += 1;
       } else {
@@ -667,16 +760,16 @@
           itemId: item.ItemID,
           name: item.Name,
           station: item.Station,
-          price: Number(item.EffectivePrice),
           qty: 1,
-          persisted: false
+          price: Number(item.EffectivePrice),
+          sent: false
         });
       }
       renderCart();
     }
 
     function updateCartQty(idx, delta) {
-      if (cart[idx].persisted) return;
+      if (cart[idx].sent) return;
       cart[idx].qty += delta;
       if (cart[idx].qty <= 0) cart.splice(idx, 1);
       renderCart();
@@ -685,202 +778,282 @@
     function renderCart() {
       const list = document.getElementById('cartItemsList');
       if (!cart.length) {
-        list.innerHTML = `<p class="py-8 text-center text-xs text-slate-400">No items in order</p>`;
-      } else {
-        list.innerHTML = cart.map((c, idx) => `
-          <div class="py-2 flex items-center justify-between gap-2">
-            <div>
-              <div class="font-semibold text-xs text-slate-900">${escapeHtml(c.name)} ${c.persisted ? '<span class="text-[10px] text-emerald-600">(Sent)</span>' : ''}</div>
-              <div class="text-[11px] text-slate-500">₱${c.price.toFixed(2)} &times; ${c.qty}</div>
-            </div>
-            <div class="flex items-center gap-1.5">
-              ${!c.persisted ? `
-                <button onclick="updateCartQty(${idx}, -1)" class="w-6 h-6 rounded bg-slate-200 font-bold text-xs">-</button>
-                <span class="text-xs font-bold w-4 text-center">${c.qty}</span>
-                <button onclick="updateCartQty(${idx}, 1)" class="w-6 h-6 rounded bg-slate-200 font-bold text-xs">+</button>
-              ` : `<span class="text-xs font-bold">₱${(c.price * c.qty).toFixed(2)}</span>`}
-            </div>
-          </div>
-        `).join('');
+        list.innerHTML = `<p class="text-xs text-slate-400 text-center py-8">Tap menu items to add to order</p>`;
+        recalculateTotals();
+        return;
       }
-      recalculateCartTotals();
+      list.innerHTML = cart.map((c, idx) => `
+        <div class="flex items-center justify-between bg-slate-50 p-2 rounded-lg border border-slate-200/70">
+          <div class="pr-2">
+            <div class="font-semibold text-xs text-slate-900">${escapeHtml(c.name)} ${c.sent ? '<span class="text-[10px] text-emerald-600 font-bold">(Sent)</span>' : ''}</div>
+            <div class="text-[11px] text-slate-500">₱${c.price.toFixed(2)} × ${c.qty}</div>
+          </div>
+          <div class="flex items-center gap-1.5">
+            ${!c.sent ? `
+              <button onclick="updateCartQty(${idx}, -1)" class="w-6 h-6 rounded bg-white border border-slate-300 font-bold text-xs">-</button>
+              <span class="w-5 text-center text-xs font-bold">${c.qty}</span>
+              <button onclick="updateCartQty(${idx}, 1)" class="w-6 h-6 rounded bg-white border border-slate-300 font-bold text-xs">+</button>
+            ` : `<span class="font-bold text-xs">₱${(c.price * c.qty).toFixed(2)}</span>`}
+          </div>
+        </div>
+      `).join('');
+      recalculateTotals();
     }
 
-    function recalculateCartTotals() {
-      const subtotal = cart.reduce((sum, i) => sum + i.price * i.qty, 0);
-      const discType = document.getElementById('discountTypeSelect').value;
-      const totalPax = Math.max(1, parseInt(document.getElementById('totalPaxInput').value || '1', 10));
-      const discPax = Math.min(totalPax, Math.max(0, parseInt(document.getElementById('discountPaxInput').value || '0', 10)));
+    function recalculateTotals() {
+      const subtotal = cart.reduce((sum, c) => sum + c.price * c.qty, 0);
+      const discType = document.getElementById('discountType').value;
+      const pax = Math.max(1, parseInt(document.getElementById('paxCount').value || '1', 10));
+      const discPax = Math.min(pax, Math.max(0, parseInt(document.getElementById('discountPax').value || '0', 10)));
 
-      document.getElementById('seniorIdFields').classList.toggle('hidden', discType === 'None');
+      document.getElementById('scPwdDetailsRow').classList.toggle('hidden', discType === 'None');
 
       let vatExemptSales = 0;
       let discountAmount = 0;
-      let vatableSales = subtotal / 1.12;
-      let vatAmount = subtotal - vatableSales;
-      let grandTotal = subtotal;
+      let vatableSales = 0;
+      let vatAmount = 0;
 
       if (discType !== 'None' && discPax > 0 && subtotal > 0) {
-        const shareGross = subtotal * (discPax / totalPax);
-        const regularGross = subtotal - shareGross;
+        const shareGross = (subtotal / pax) * discPax;
+        const remainingGross = subtotal - shareGross;
+
         vatExemptSales = shareGross / 1.12;
         discountAmount = vatExemptSales * 0.20;
-        vatableSales = regularGross / 1.12;
-        vatAmount = regularGross - vatableSales;
-        grandTotal = (vatExemptSales - discountAmount) + regularGross;
+
+        vatableSales = remainingGross / 1.12;
+        vatAmount = remainingGross - vatableSales;
+      } else {
+        vatableSales = subtotal / 1.12;
+        vatAmount = subtotal - vatableSales;
       }
+
+      const grandTotal = (vatExemptSales - discountAmount) + vatableSales + vatAmount;
 
       document.getElementById('lblSubtotal').textContent = `₱${subtotal.toFixed(2)}`;
+      document.getElementById('lblVatable').textContent = `₱${vatableSales.toFixed(2)}`;
+      document.getElementById('lblVat').textContent = `₱${vatAmount.toFixed(2)}`;
       document.getElementById('lblVatExempt').textContent = `₱${vatExemptSales.toFixed(2)}`;
       document.getElementById('lblDiscount').textContent = `-₱${discountAmount.toFixed(2)}`;
-      document.getElementById('lblVatBreakdown').textContent = `₱${vatableSales.toFixed(2)} / ₱${vatAmount.toFixed(2)}`;
       document.getElementById('lblGrandTotal').textContent = `₱${grandTotal.toFixed(2)}`;
 
-      return { subtotal, discType, totalPax, discPax, vatExemptSales, discountAmount, vatableSales, vatAmount, grandTotal };
+      return { subtotal, discType, pax, discPax, vatExemptSales, discountAmount, vatableSales, vatAmount, grandTotal };
     }
 
-    async function sendOrderToKitchen() {
-      const unsent = cart.filter(c => !c.persisted);
-      if (!unsent.length) return alert('No new items to send.');
-
-      const totals = recalculateCartTotals();
-      let orderId = activeOrderId;
-
-      if (!orderId) {
-        orderId = crypto.randomUUID();
-        const orderNum = 'ORD-' + Date.now().toString().slice(-6);
-        const { error } = await supabase.from('orders').insert({
-          OrderID: orderId,
-          OrderNumber: orderNum,
-          BranchID: activeBranchId,
-          TableID: selectedTable?.TableID || null,
-          TableNumber: selectedTable?.TableNumber || 'Take-Out',
-          OrderType: selectedTable ? 'Dine-In' : 'Take-Out',
-          Status: 'Preparing',
-          Subtotal: totals.subtotal,
-          GrandTotal: totals.grandTotal,
-          CreatedBy: currentUser.userId
-        });
-        if (error) return alert(error.message);
-
-        if (selectedTable) {
-          await supabase.from('restaurant_tables')
-            .update({ Status: 'Occupied', CurrentOrderID: orderId })
-            .eq('TableID', selectedTable.TableID);
-        }
-        activeOrderId = orderId;
-      }
-
-      const rows = unsent.map(u => ({
-        OrderItemID: crypto.randomUUID(),
-        OrderID: orderId,
-        BranchID: activeBranchId,
-        ItemID: u.itemId,
-        ItemName: u.name,
-        Station: u.station,
-        Qty: u.qty,
-        UnitPrice: u.price,
-        LineTotal: u.price * u.qty,
-        KitchenStatus: 'Pending'
-      }));
-
-      const { error: itemErr } = await supabase.from('order_items').insert(rows);
-      if (itemErr) return alert(itemErr.message);
-
-      cart.forEach(c => c.persisted = true);
-      await loadTables();
-      await loadOpenOrders();
+    function resetOrderCart() {
+      selectedTable = null;
+      activeOrderId = null;
+      cart = [];
+      document.getElementById('discountType').value = 'None';
+      document.getElementById('paxCount').value = '1';
+      document.getElementById('discountPax').value = '0';
+      document.getElementById('scPwdId').value = '';
+      document.getElementById('scPwdName').value = '';
+      document.getElementById('orderPanelTitle').textContent = 'Select a Table or Takeout';
+      document.getElementById('orderPanelSub').textContent = 'No active order selected';
+      renderTables();
       renderCart();
     }
 
-    async function settleCurrentOrder() {
-      if (!cart.length) return;
-      if (cart.some(c => !c.persisted)) {
-        await sendOrderToKitchen();
-      }
-      const totals = recalculateCartTotals();
-      const tendered = parseFloat(prompt(`Grand Total: ₱${totals.grandTotal.toFixed(2)}\nEnter Cash Tendered:`, totals.grandTotal.toFixed(2)));
-      if (isNaN(tendered) || tendered < totals.grandTotal) return alert('Insufficient payment amount.');
+    async function sendOrderToKitchen() {
+      if (!cart.length) return alert('Add items to the order first.');
+      const totals = recalculateTotals();
+      const isNew = !activeOrderId;
+      const orderId = activeOrderId || crypto.randomUUID();
 
-      const change = tendered - totals.grandTotal;
-      const { error } = await supabase.from('orders').update({
-        Status: 'Paid',
+      const orderPayload = {
+        OrderID: orderId,
+        OrderNumber: isNew ? `ORD-${Date.now().toString().slice(-6)}` : undefined,
+        BranchID: activeBranchId,
+        TableID: selectedTable ? selectedTable.TableID : null,
+        TableNumber: selectedTable ? selectedTable.TableNumber : 'Takeout',
+        OrderType: selectedTable ? 'Dine-In' : 'Takeout',
+        Status: 'Open',
         Subtotal: totals.subtotal,
         DiscountType: totals.discType,
-        PaxCount: totals.totalPax,
+        PaxCount: totals.pax,
         DiscountPax: totals.discPax,
-        SeniorPwdId: document.getElementById('seniorIdNumber').value.trim() || null,
-        SeniorPwdName: document.getElementById('seniorFullName').value.trim() || null,
+        SeniorPwdId: document.getElementById('scPwdId').value.trim() || null,
+        SeniorPwdName: document.getElementById('scPwdName').value.trim() || null,
         VatExemptSales: totals.vatExemptSales,
         DiscountAmount: totals.discountAmount,
         VatableSales: totals.vatableSales,
         VatAmount: totals.vatAmount,
         GrandTotal: totals.grandTotal,
-        PaymentMethod: 'Cash',
+        CreatedBy: currentUser.userId
+      };
+
+      if (isNew) {
+        const { error } = await supabase.from('orders').insert(orderPayload);
+        if (error) return alert(error.message);
+        activeOrderId = orderId;
+      } else {
+        delete orderPayload.OrderNumber;
+        const { error } = await supabase.from('orders').update(orderPayload).eq('OrderID', orderId);
+        if (error) return alert(error.message);
+      }
+
+      const unsent = cart.filter(c => !c.sent);
+      if (unsent.length) {
+        const rows = unsent.map(u => ({
+          OrderItemID: crypto.randomUUID(),
+          OrderID: orderId,
+          BranchID: activeBranchId,
+          ItemID: u.itemId,
+          ItemName: u.name,
+          Station: u.station,
+          Qty: u.qty,
+          UnitPrice: u.price,
+          LineTotal: u.price * u.qty,
+          KitchenStatus: 'Pending'
+        }));
+        const { error: itemErr } = await supabase.from('order_items').insert(rows);
+        if (itemErr) return alert(itemErr.message);
+        unsent.forEach(u => u.sent = true);
+      }
+
+      if (selectedTable) {
+        await supabase.from('restaurant_tables').update({ Status: 'Occupied', CurrentOrderID: orderId }).eq('TableID', selectedTable.TableID);
+      }
+
+      renderCart();
+      await reloadAllBranchData();
+      alert('Order sent to Kitchen / Bar!');
+    }
+
+    function openCheckoutModal() {
+      if (!cart.length) return alert('No items to settle.');
+      const totals = recalculateTotals();
+      document.getElementById('modalTotalDue').textContent = `₱${totals.grandTotal.toFixed(2)}`;
+      document.getElementById('amountTendered').value = totals.grandTotal.toFixed(2);
+      updateChangeDue();
+      document.getElementById('checkoutModal').classList.remove('hidden');
+    }
+
+    function closeCheckoutModal() {
+      document.getElementById('checkoutModal').classList.add('hidden');
+    }
+
+    function updateChangeDue() {
+      const totals = recalculateTotals();
+      const tendered = parseFloat(document.getElementById('amountTendered').value || '0');
+      const change = Math.max(0, tendered - totals.grandTotal);
+      document.getElementById('modalChangeDue').textContent = `₱${change.toFixed(2)}`;
+    }
+
+    async function confirmPayment() {
+      if (!activeOrderId) await sendOrderToKitchen();
+      const totals = recalculateTotals();
+      const method = document.getElementById('paymentMethod').value;
+      const tendered = parseFloat(document.getElementById('amountTendered').value || '0');
+      if (tendered < totals.grandTotal) return alert('Amount tendered is less than Grand Total.');
+
+      const { error } = await supabase.from('orders').update({
+        Status: 'Paid',
+        Subtotal: totals.subtotal,
+        DiscountType: totals.discType,
+        PaxCount: totals.pax,
+        DiscountPax: totals.discPax,
+        SeniorPwdId: document.getElementById('scPwdId').value.trim() || null,
+        SeniorPwdName: document.getElementById('scPwdName').value.trim() || null,
+        VatExemptSales: totals.vatExemptSales,
+        DiscountAmount: totals.discountAmount,
+        VatableSales: totals.vatableSales,
+        VatAmount: totals.vatAmount,
+        GrandTotal: totals.grandTotal,
+        PaymentMethod: method,
         AmountTendered: tendered,
-        ChangeAmount: change,
+        ChangeAmount: tendered - totals.grandTotal,
         PaidAt: new Date().toISOString()
       }).eq('OrderID', activeOrderId);
 
       if (error) return alert(error.message);
 
       if (selectedTable) {
-        await supabase.from('restaurant_tables')
-          .update({ Status: 'Available', CurrentOrderID: null })
-          .eq('TableID', selectedTable.TableID);
+        await supabase.from('restaurant_tables').update({ Status: 'Available', CurrentOrderID: null }).eq('TableID', selectedTable.TableID);
       }
 
-      alert(`Payment settled! Change: ₱${change.toFixed(2)}`);
+      closeCheckoutModal();
       resetOrderCart();
-      await loadTables();
-      await loadOpenOrders();
-      await loadEodPreview();
+      await reloadAllBranchData();
+      alert('Payment settled!');
     }
 
-    // -------------------- KITCHEN DISPLAY --------------------
+    // -------------------- KDS --------------------
     async function loadOpenOrders() {
-      const { data } = await supabase
+      const { data: orders } = await supabase
         .from('orders')
-        .select('*, order_items(*)')
+        .select('*')
         .eq('BranchID', activeBranchId)
-        .in('Status', ['Open', 'Preparing', 'Ready'])
+        .eq('Status', 'Open')
         .order('CreatedAt', { ascending: true });
-      openOrders = data || [];
-      renderKitchenTickets();
+
+      const { data: items } = await supabase
+        .from('order_items')
+        .select('*')
+        .eq('BranchID', activeBranchId)
+        .neq('KitchenStatus', 'Served');
+
+      openOrders = (orders || []).map(o => ({
+        ...o,
+        items: (items || []).filter(i => i.OrderID === o.OrderID)
+      })).filter(o => o.items.length > 0);
+
+      renderKds();
     }
 
-    function renderKitchenTickets() {
-      const grid = document.getElementById('kitchenTicketsGrid');
-      if (!openOrders.length) {
-        grid.innerHTML = `<p class="col-span-full text-center py-10 text-xs text-slate-400">No active kitchen orders for this branch.</p>`;
+    function setKdsStation(station) {
+      kdsStationFilter = station;
+      document.querySelectorAll('.kds-filter-btn').forEach(b => {
+        b.className = b.dataset.station === station
+          ? 'kds-filter-btn px-3 py-1.5 rounded-lg bg-indigo-600 text-white'
+          : 'kds-filter-btn px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700';
+      });
+      renderKds();
+    }
+
+    function renderKds() {
+      const grid = document.getElementById('kdsTicketsGrid');
+      const filtered = openOrders.map(o => ({
+        ...o,
+        items: o.items.filter(i => kdsStationFilter === 'ALL' || i.Station === kdsStationFilter)
+      })).filter(o => o.items.length > 0);
+
+      if (!filtered.length) {
+        grid.innerHTML = `<p class="col-span-full text-xs text-slate-400 bg-white p-6 rounded-xl border border-slate-200 text-center">No active tickets in queue.</p>`;
         return;
       }
-      grid.innerHTML = openOrders.map(o => `
+
+      grid.innerHTML = filtered.map(o => `
         <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-3">
-          <div class="flex justify-between items-center border-b pb-2">
+          <div class="flex justify-between items-center border-b border-slate-100 pb-2">
             <div>
-              <span class="font-extrabold text-sm">${escapeHtml(o.TableNumber || 'Take-Out')}</span>
-              <span class="text-xs text-slate-500 ml-1.5">#${escapeHtml(o.OrderNumber)}</span>
+              <span class="font-extrabold text-sm text-slate-900">${escapeHtml(o.TableNumber || 'Takeout')}</span>
+              <span class="text-xs text-slate-400 ml-1.5">#${escapeHtml(o.OrderNumber)}</span>
             </div>
-            <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800">${o.Status}</span>
+            <span class="text-[11px] font-semibold text-slate-500">${new Date(o.CreatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
           </div>
-          <ul class="space-y-1.5 text-xs">
-            ${(o.order_items || []).map(i => `
-              <li class="flex justify-between">
-                <span><strong>${i.Qty}x</strong> ${escapeHtml(i.ItemName)}</span>
-                <span class="text-slate-400">${i.Station}</span>
-              </li>
+          <div class="space-y-2 text-xs">
+            ${o.items.map(i => `
+              <div class="flex items-center justify-between bg-slate-50 p-2 rounded-lg">
+                <div>
+                  <span class="font-bold text-slate-900">${i.Qty}× ${escapeHtml(i.ItemName)}</span>
+                  <span class="block text-[10px] text-slate-500">${escapeHtml(i.Station)} • ${escapeHtml(i.KitchenStatus)}</span>
+                </div>
+                <button onclick="advanceKitchenStatus('${i.OrderItemID}', '${i.KitchenStatus}')"
+                  class="px-2.5 py-1 rounded font-bold text-[11px] ${i.KitchenStatus === 'Pending' ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white'}">
+                  ${i.KitchenStatus === 'Pending' ? 'Start Prep' : 'Mark Served'}
+                </button>
+              </div>
             `).join('')}
-          </ul>
-          <button onclick="markOrderReady('${o.OrderID}')" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2 rounded-lg">
-            Mark Order Ready
-          </button>
+          </div>
         </div>
       `).join('');
     }
 
-    async function markOrderReady(orderId) {
-      await supabase.from('orders').update({ Status: 'Ready' }).eq('OrderID', orderId);
+    async function advanceKitchenStatus(orderItemId, currentStatus) {
+      const next = currentStatus === 'Pending' ? 'Preparing' : 'Served';
+      const { error } = await supabase.from('order_items').update({ KitchenStatus: next }).eq('OrderItemID', orderItemId);
+      if (error) return alert(error.message);
       await loadOpenOrders();
     }
 
@@ -889,84 +1062,92 @@
       const tbody = document.getElementById('branchMenuTableBody');
       tbody.innerHTML = branchMenu.map(m => `
         <tr>
-          <td class="px-4 py-2.5 font-semibold">${escapeHtml(m.Name)}</td>
-          <td class="px-4 py-2.5 text-xs text-slate-600">${escapeHtml(m.Category)}</td>
-          <td class="px-4 py-2.5 text-xs">${escapeHtml(m.Station)}</td>
-          <td class="px-4 py-2.5 font-bold">₱${Number(m.EffectivePrice).toFixed(2)}</td>
-          <td class="px-4 py-2.5 text-xs">${m.StockQty === null ? 'Unlimited' : m.StockQty}</td>
-          <td class="px-4 py-2.5 text-right">
-            <button onclick="toggleBranchItem86('${m.BranchMenuID}', ${!m.IsAvailable})"
-              class="px-2.5 py-1 rounded text-xs font-bold ${m.IsAvailable ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}">
-              ${m.IsAvailable ? 'Available' : '86 / Unavailable'}
-            </button>
+          <td class="p-3 font-bold text-slate-900">${escapeHtml(m.Name)}</td>
+          <td class="p-3 text-slate-600">${escapeHtml(m.Category)}</td>
+          <td class="p-3 text-slate-600">${escapeHtml(m.Station)}</td>
+          <td class="p-3">₱${Number(m.MasterPrice).toFixed(2)}</td>
+          <td class="p-3">
+            <input type="number" step="0.01" value="${m.PriceOverride ?? ''}" placeholder="Default"
+              onchange="updateBranchMenuOverride('${m.BranchMenuID}', this.value)"
+              class="w-24 border border-slate-300 rounded px-2 py-1 text-xs" />
+          </td>
+          <td class="p-3 font-bold text-indigo-700">₱${Number(m.EffectivePrice).toFixed(2)}</td>
+          <td class="p-3">
+            <input type="checkbox" ${m.IsAvailable ? 'checked' : ''}
+              onchange="toggleBranchMenuAvail('${m.BranchMenuID}', this.checked)" />
           </td>
         </tr>
       `).join('');
     }
 
-    async function toggleBranchItem86(branchMenuId, nextState) {
-      await supabase.from('branch_menu_items')
-        .update({ Available: nextState, UpdatedAt: new Date().toISOString() })
-        .eq('BranchMenuID', branchMenuId);
+    async function toggleBranchMenuAvail(branchMenuId, avail) {
+      const { error } = await supabase.from('branch_menu_items').update({ Available: avail, UpdatedAt: new Date().toISOString() }).eq('BranchMenuID', branchMenuId);
+      if (error) return alert(error.message);
       await loadBranchMenu();
     }
 
-    async function promptAddMasterMenuItem() {
-      const name = prompt('Item Name:');
-      if (!name) return;
-      const category = prompt('Category (Mains, Soup, Drinks, Bar):', 'Mains') || 'Mains';
-      const price = parseFloat(prompt('Price (₱):', '150') || '0');
-      const station = prompt('Station (Kitchen or Bar):', 'Kitchen') === 'Bar' ? 'Bar' : 'Kitchen';
+    async function updateBranchMenuOverride(branchMenuId, val) {
+      const priceOverride = val === '' ? null : parseFloat(val);
+      const { error } = await supabase.from('branch_menu_items').update({ PriceOverride: priceOverride, UpdatedAt: new Date().toISOString() }).eq('BranchMenuID', branchMenuId);
+      if (error) return alert(error.message);
+      await loadBranchMenu();
+    }
 
-      await supabase.from('menu_items').insert({
+    function openAddMasterMenuModal() {
+      document.getElementById('masterMenuModal').classList.remove('hidden');
+    }
+
+    async function saveMasterMenuItem(e) {
+      e.preventDefault();
+      const { error } = await supabase.from('menu_items').insert({
         ItemID: crypto.randomUUID(),
-        Name: name.trim(),
-        Category: category.trim(),
-        Price: price,
-        Station: station,
+        Name: document.getElementById('newMenuName').value.trim(),
+        Category: document.getElementById('newMenuCategory').value.trim(),
+        Station: document.getElementById('newMenuStation').value,
+        Price: parseFloat(document.getElementById('newMenuPrice').value),
         Available: true
       });
+      if (error) return alert(error.message);
+      document.getElementById('masterMenuModal').classList.add('hidden');
       await loadBranchMenu();
     }
 
-    // -------------------- END OF DAY REPORT --------------------
-    let currentEodStats = { cashSales: 0, discounts: 0, vatExempt: 0, vatable: 0, vat: 0 };
-
+    // -------------------- END OF DAY --------------------
     async function loadEodPreview() {
       const today = new Date().toISOString().slice(0, 10);
-      const { data: paidOrders } = await supabase
+      const { data: paid } = await supabase
         .from('orders')
         .select('*')
         .eq('BranchID', activeBranchId)
         .eq('Status', 'Paid')
         .gte('PaidAt', `${today}T00:00:00`);
 
-      const list = paidOrders || [];
-      currentEodStats = list.reduce((acc, o) => {
-        acc.cashSales += Number(o.GrandTotal || 0);
-        acc.discounts += Number(o.DiscountAmount || 0);
-        acc.vatExempt += Number(o.VatExemptSales || 0);
-        acc.vatable += Number(o.VatableSales || 0);
-        acc.vat += Number(o.VatAmount || 0);
-        return acc;
-      }, { cashSales: 0, discounts: 0, vatExempt: 0, vatable: 0, vat: 0 });
+      const rows = paid || [];
+      eodComputed = {
+        cashSales: rows.filter(r => r.PaymentMethod === 'Cash').reduce((s, r) => s + Number(r.GrandTotal), 0),
+        nonCashSales: rows.filter(r => r.PaymentMethod !== 'Cash').reduce((s, r) => s + Number(r.GrandTotal), 0),
+        discounts: rows.reduce((s, r) => s + Number(r.DiscountAmount), 0),
+        vatExempt: rows.reduce((s, r) => s + Number(r.VatExemptSales), 0),
+        vatable: rows.reduce((s, r) => s + Number(r.VatableSales), 0),
+        vat: rows.reduce((s, r) => s + Number(r.VatAmount), 0)
+      };
 
       document.getElementById('eodSummaryBox').innerHTML = `
-        <div class="flex justify-between"><span>Business Date:</span><strong>${today}</strong></div>
-        <div class="flex justify-between"><span>Paid Transactions:</span><strong>${list.length}</strong></div>
-        <div class="flex justify-between"><span>VAT-Exempt Sales:</span><span>₱${currentEodStats.vatExempt.toFixed(2)}</span></div>
-        <div class="flex justify-between"><span>SC/PWD 20% Discounts:</span><span>₱${currentEodStats.discounts.toFixed(2)}</span></div>
-        <div class="flex justify-between"><span>VATable Sales:</span><span>₱${currentEodStats.vatable.toFixed(2)}</span></div>
-        <div class="flex justify-between"><span>12% VAT Output:</span><span>₱${currentEodStats.vat.toFixed(2)}</span></div>
-        <div class="flex justify-between text-base font-extrabold border-t pt-2"><span>Total Cash Sales:</span><span>₱${currentEodStats.cashSales.toFixed(2)}</span></div>
+        <div class="bg-slate-50 p-3 rounded-lg"><span class="text-slate-500 block">Cash Sales</span><strong class="text-sm">₱${eodComputed.cashSales.toFixed(2)}</strong></div>
+        <div class="bg-slate-50 p-3 rounded-lg"><span class="text-slate-500 block">Non-Cash Sales</span><strong class="text-sm">₱${eodComputed.nonCashSales.toFixed(2)}</strong></div>
+        <div class="bg-slate-50 p-3 rounded-lg"><span class="text-slate-500 block">SC/PWD Discounts</span><strong class="text-sm text-emerald-700">₱${eodComputed.discounts.toFixed(2)}</strong></div>
+        <div class="bg-slate-50 p-3 rounded-lg"><span class="text-slate-500 block">VATable Sales</span><strong class="text-sm">₱${eodComputed.vatable.toFixed(2)}</strong></div>
+        <div class="bg-slate-50 p-3 rounded-lg"><span class="text-slate-500 block">12% VAT</span><strong class="text-sm">₱${eodComputed.vat.toFixed(2)}</strong></div>
+        <div class="bg-slate-50 p-3 rounded-lg"><span class="text-slate-500 block">VAT-Exempt Sales</span><strong class="text-sm">₱${eodComputed.vatExempt.toFixed(2)}</strong></div>
       `;
     }
 
-    async function submitEndOfDayReport() {
+    function updateEodExpected() {}
+
+    async function submitEodReport() {
       const opening = parseFloat(document.getElementById('eodOpeningCash').value || '0');
       const actual = parseFloat(document.getElementById('eodActualCash').value || '0');
-      const expected = opening + currentEodStats.cashSales;
-      const variance = actual - expected;
+      const expected = opening + eodComputed.cashSales;
 
       const { error } = await supabase.from('eod_reports').insert({
         ReportID: crypto.randomUUID(),
@@ -974,65 +1155,51 @@
         BusinessDate: new Date().toISOString().slice(0, 10),
         ClosedBy: currentUser.userId,
         OpeningCash: opening,
-        CashSales: currentEodStats.cashSales,
-        SeniorPwdDiscounts: currentEodStats.discounts,
-        VatExemptSales: currentEodStats.vatExempt,
-        VatableSales: currentEodStats.vatable,
-        VatAmount: currentEodStats.vat,
+        CashSales: eodComputed.cashSales,
+        NonCashSales: eodComputed.nonCashSales,
+        SeniorPwdDiscounts: eodComputed.discounts,
+        VatExemptSales: eodComputed.vatExempt,
+        VatableSales: eodComputed.vatable,
+        VatAmount: eodComputed.vat,
         ExpectedCash: expected,
         ActualCashCount: actual,
-        Variance: variance
+        Variance: actual - expected,
+        Notes: document.getElementById('eodNotes').value.trim() || null
       });
-
       if (error) return alert(error.message);
-      alert(`End of Day closed! Variance: ₱${variance.toFixed(2)}`);
+      alert(`End of Day Report submitted! Cash Variance: ₱${(actual - expected).toFixed(2)}`);
     }
 
-    // -------------------- PER-BRANCH STAFF MANAGEMENT --------------------
+    // -------------------- USERS & BRANCH MANAGER --------------------
     function populateUserBranchSelect() {
       const sel = document.getElementById('userBranchSelect');
-      const adminOpt = document.getElementById('optAdminRole');
-      if (currentUser.role === 'Manager') {
-        adminOpt.classList.add('hidden');
-        sel.innerHTML = `<option value="${currentUser.branchId}">${escapeHtml(currentUser.branchName)}</option>`;
-        sel.disabled = true;
-      } else {
-        adminOpt.classList.remove('hidden');
-        sel.disabled = false;
-        sel.innerHTML = `<option value="">-- Global (Admin Only) --</option>` +
-          allBranches.map(b => `<option value="${b.BranchID}">${escapeHtml(b.BranchName)}</option>`).join('');
-      }
+      if (!sel) return;
+      sel.innerHTML = (currentUser.role === 'Admin' ? `<option value="">-- Global / All Branches (Admin) --</option>` : '') +
+        allBranches.map(b => `<option value="${b.BranchID}">${escapeHtml(b.BranchName)} (${escapeHtml(b.BranchCode)})</option>`).join('');
+      if (currentUser.role !== 'Admin') sel.value = activeBranchId;
     }
 
     async function loadUsers() {
-      const { data } = await supabase
-        .from('users')
-        .select('UserID, Username, FullName, Role, BranchID, Active')
-        .order('CreatedAt', { ascending: true });
+      const { data, error } = await supabase.from('users').select('*').order('FullName', { ascending: true });
+      if (error) throw error;
       usersList = data || [];
-      renderUsersTable();
-    }
-
-    function renderUsersTable() {
       const tbody = document.getElementById('usersTableBody');
       tbody.innerHTML = usersList.map(u => {
-        const b = allBranches.find(br => br.BranchID === u.BranchID);
+        const bName = allBranches.find(b => b.BranchID === u.BranchID)?.BranchName || (u.Role === 'Admin' ? 'All Branches' : u.BranchID);
         return `
           <tr>
-            <td class="px-4 py-2.5 font-semibold">${escapeHtml(u.FullName)}</td>
-            <td class="px-4 py-2.5 font-mono text-xs">${escapeHtml(u.Username)}</td>
-            <td class="px-4 py-2.5 text-xs font-bold">${escapeHtml(u.Role)}</td>
-            <td class="px-4 py-2.5 text-xs">${escapeHtml(b ? b.BranchName : 'All Branches')}</td>
-            <td class="px-4 py-2.5 text-xs">${u.Active ? 'Active' : 'Inactive'}</td>
-            <td class="px-4 py-2.5 text-right">
-              <button onclick="editUserRow('${u.UserID}')" class="text-xs font-semibold text-indigo-600 hover:underline">Edit</button>
-            </td>
+            <td class="p-3 font-bold">${escapeHtml(u.FullName)}</td>
+            <td class="p-3">${escapeHtml(u.Username)}</td>
+            <td class="p-3">${escapeHtml(u.Role)}</td>
+            <td class="p-3">${escapeHtml(bName || '')}</td>
+            <td class="p-3">${u.Active ? '<span class="text-emerald-600 font-bold">Active</span>' : '<span class="text-rose-600">Inactive</span>'}</td>
+            <td class="p-3"><button onclick="editUser('${u.UserID}')" class="text-indigo-600 font-bold hover:underline">Edit</button></td>
           </tr>
         `;
       }).join('');
     }
 
-    function editUserRow(userId) {
+    function editUser(userId) {
       const u = usersList.find(x => x.UserID === userId);
       if (!u) return;
       document.getElementById('editUserId').value = u.UserID;
@@ -1040,125 +1207,79 @@
       document.getElementById('userUsername').value = u.Username;
       document.getElementById('userRole').value = u.Role;
       document.getElementById('userBranchSelect').value = u.BranchID || '';
+      document.getElementById('userActive').checked = u.Active;
       document.getElementById('userPassword').value = '';
     }
 
     function resetUserForm() {
-      document.getElementById('editUserId').value = '';
       document.getElementById('userForm').reset();
-      populateUserBranchSelect();
+      document.getElementById('editUserId').value = '';
     }
 
     async function handleUserFormSubmit(e) {
       e.preventDefault();
       const { error } = await supabase.rpc('pos_admin_save_user', {
-        p_user_id: document.getElementById('editUserId').value.trim(),
+        p_user_id: document.getElementById('editUserId').value || null,
         p_full_name: document.getElementById('userFullName').value.trim(),
         p_username: document.getElementById('userUsername').value.trim(),
         p_role: document.getElementById('userRole').value,
-        p_password: document.getElementById('userPassword').value,
-        p_branch_id: document.getElementById('userBranchSelect').value,
-        p_active: true
+        p_password: document.getElementById('userPassword').value || null,
+        p_branch_id: document.getElementById('userBranchSelect').value || null,
+        p_active: document.getElementById('userActive').checked
       });
       if (error) return alert(error.message);
       resetUserForm();
       await loadUsers();
+      alert('User saved!');
     }
 
-    // -------------------- GLOBAL ADMIN BRANCH MODAL --------------------
     async function openBranchManagerModal() {
-      resetBranchForm();
       document.getElementById('branchManagerModal').classList.remove('hidden');
-      await loadBranchesForModal();
+      const { data } = await supabase.from('branches').select('*').order('BranchName', { ascending: true });
+      modalBranchesCache = data || [];
+      document.getElementById('branchesModalList').innerHTML = modalBranchesCache.map(b => `
+        <div class="py-2.5 flex items-center justify-between">
+          <div>
+            <span class="font-bold text-slate-900">${escapeHtml(b.BranchName)}</span>
+            <span class="ml-1.5 text-[11px] px-1.5 py-0.5 rounded bg-slate-100 font-mono">${escapeHtml(b.BranchCode)}</span>
+            <span class="block text-slate-500">${escapeHtml(b.Address || '')}</span>
+          </div>
+          <button onclick="editBranchModal('${b.BranchID}')" class="text-indigo-600 font-bold hover:underline">Edit</button>
+        </div>
+      `).join('');
+    }
+
+    function editBranchModal(branchId) {
+      const b = modalBranchesCache.find(x => x.BranchID === branchId);
+      if (!b) return;
+      document.getElementById('editBranchId').value = b.BranchID;
+      document.getElementById('branchNameInput').value = b.BranchName;
+      document.getElementById('branchCodeInput').value = b.BranchCode;
+      document.getElementById('branchAddressInput').value = b.Address || '';
     }
 
     function closeBranchManagerModal() {
       document.getElementById('branchManagerModal').classList.add('hidden');
-    }
-
-    async function loadBranchesForModal() {
-      const { data } = await supabase.from('branches').select('*').order('CreatedAt', { ascending: true });
-      modalBranchesCache = data || [];
-      document.getElementById('branchesTableBody').innerHTML = modalBranchesCache.map(b => `
-        <tr>
-          <td class="px-4 py-2.5 font-mono text-xs font-bold">${escapeHtml(b.BranchCode)}</td>
-          <td class="px-4 py-2.5 font-semibold">${escapeHtml(b.BranchName)}</td>
-          <td class="px-4 py-2.5 text-xs text-slate-600">${escapeHtml(b.Address || '—')}</td>
-          <td class="px-4 py-2.5 text-xs font-bold ${b.Active ? 'text-emerald-700' : 'text-slate-400'}">${b.Active ? 'Active' : 'Inactive'}</td>
-          <td class="px-4 py-2.5 text-right space-x-2">
-            <button onclick="populateBranchEdit('${b.BranchID}')" class="text-xs font-semibold text-indigo-600 hover:underline">Edit</button>
-            <button onclick="toggleBranchStatus('${b.BranchID}')" class="text-xs font-semibold text-amber-700 hover:underline">
-              ${b.Active ? 'Deactivate' : 'Activate'}
-            </button>
-          </td>
-        </tr>
-      `).join('');
-    }
-
-    function populateBranchEdit(branchId) {
-      const b = modalBranchesCache.find(x => x.BranchID === branchId);
-      if (!b) return;
-      document.getElementById('branchFormTitle').textContent = `Edit Branch: ${b.BranchName}`;
-      document.getElementById('editBranchId').value = b.BranchID;
-      document.getElementById('inputBranchName').value = b.BranchName;
-      document.getElementById('inputBranchCode').value = b.BranchCode;
-      document.getElementById('inputBranchAddress').value = b.Address || '';
-      document.getElementById('inputBranchActive').value = b.Active ? 'true' : 'false';
-      document.getElementById('btnCancelBranchEdit').classList.remove('hidden');
-    }
-
-    function resetBranchForm() {
-      document.getElementById('branchFormTitle').textContent = 'Add New Branch';
       document.getElementById('editBranchId').value = '';
-      document.getElementById('branchForm').reset();
-      document.getElementById('btnCancelBranchEdit').classList.add('hidden');
-      document.getElementById('branchFormStatus').textContent = '';
+      document.getElementById('branchNameInput').value = '';
+      document.getElementById('branchCodeInput').value = '';
+      document.getElementById('branchAddressInput').value = '';
     }
 
-    async function handleBranchFormSubmit(e) {
+    async function saveBranchForm(e) {
       e.preventDefault();
-      const statusEl = document.getElementById('branchFormStatus');
-      statusEl.textContent = '';
       const { error } = await supabase.rpc('pos_admin_save_branch', {
-        p_branch_id: document.getElementById('editBranchId').value.trim(),
-        p_branch_name: document.getElementById('inputBranchName').value.trim(),
-        p_branch_code: document.getElementById('inputBranchCode').value.trim().toUpperCase(),
-        p_address: document.getElementById('inputBranchAddress').value.trim(),
-        p_active: document.getElementById('inputBranchActive').value === 'true'
-      });
-      if (error) {
-        statusEl.textContent = error.message;
-        return;
-      }
-      resetBranchForm();
-      await loadBranchesForModal();
-      await initBranchContext();
-      populateUserBranchSelect();
-    }
-
-    async function toggleBranchStatus(branchId) {
-      const b = modalBranchesCache.find(x => x.BranchID === branchId);
-      if (!b) return;
-      if (b.BranchID === 'branch-main' && b.Active) return alert('Main Branch cannot be deactivated.');
-      const { error } = await supabase.rpc('pos_admin_save_branch', {
-        p_branch_id: b.BranchID,
-        p_branch_name: b.BranchName,
-        p_branch_code: b.BranchCode,
-        p_address: b.Address || '',
-        p_active: !b.Active
+        p_branch_id: document.getElementById('editBranchId').value || null,
+        p_branch_name: document.getElementById('branchNameInput').value.trim(),
+        p_branch_code: document.getElementById('branchCodeInput').value.trim(),
+        p_address: document.getElementById('branchAddressInput').value.trim(),
+        p_active: true
       });
       if (error) return alert(error.message);
-      await loadBranchesForModal();
+      closeBranchManagerModal();
       await initBranchContext();
-      populateUserBranchSelect();
-    }
-
-    function escapeHtml(str) {
-      return String(str ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
+      await reloadAllBranchData();
+      alert('Branch saved!');
     }
   </script>
 </body>
