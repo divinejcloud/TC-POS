@@ -50,7 +50,6 @@
       <span id="realtimeBadge" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> LIVE
       </span>
-      <!-- Branch Context Switcher (Admin dropdown / Staff badge) -->
       <div id="branchSwitcherContainer" class="flex items-center gap-2"></div>
       <button id="btnOpenBranchModal" onclick="openBranchManagerModal()" class="hidden text-xs bg-indigo-600 hover:bg-indigo-500 px-2.5 py-1 rounded font-semibold">
         + Manage Branches
@@ -78,9 +77,7 @@
 
     <!-- TAB 1: POS & TABLES -->
     <section id="tab-pos" class="tab-panel grid grid-cols-1 lg:grid-cols-12 gap-4">
-      <!-- Left: Tables & Menu -->
       <div class="lg:col-span-8 space-y-4">
-        <!-- Tables Grid -->
         <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
           <div class="flex items-center justify-between mb-3">
             <h2 class="font-bold text-slate-800 text-sm uppercase tracking-wider">Floor Tables</h2>
@@ -92,7 +89,6 @@
           <div id="tablesGrid" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5"></div>
         </div>
 
-        <!-- Menu Selection -->
         <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
           <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
             <h2 class="font-bold text-slate-800 text-sm uppercase tracking-wider">Menu Items</h2>
@@ -119,7 +115,6 @@
             <button onclick="resetOrderCart()" class="text-xs text-slate-400 hover:text-rose-600 font-semibold">Clear</button>
           </div>
 
-          <!-- Cart Items -->
           <div id="cartItemsList" class="space-y-2 max-h-[260px] overflow-y-auto scrollbar-thin pr-1 text-sm">
             <p class="text-xs text-slate-400 text-center py-8">Tap menu items to add to order</p>
           </div>
@@ -397,7 +392,8 @@
     const SUPABASE_URL = 'https://dhmekquviaoxxiqhxxih.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRobWVrcXV2aWFveHhpcWh4eGloIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTUwOTA2NTIsImV4cCI6MjExMDY2NjY1Mn0.rKdhiL4u9O477jlK5NapE-plNuvuzavyg6zXqgyL8Y4';
 
-    let supabase = null;
+    // NOTE: Named 'sbClient' so it never collides with global 'window.supabase' from CDN
+    let sbClient = null;
     let currentUser = null;
     let posToken = localStorage.getItem('pos_token') || '';
     let activeBranchId = null;
@@ -431,7 +427,7 @@
     }
 
     function createSupabaseClient(token) {
-      if (!window.supabase) {
+      if (!window.supabase || !window.supabase.createClient) {
         throw new Error('Supabase JS library failed to load. Check your internet connection.');
       }
       if (!SUPABASE_URL.startsWith('http') || SUPABASE_ANON_KEY === 'YOUR_SUPABASE_ANON_KEY') {
@@ -447,7 +443,7 @@
     // Boot check on page load
     (async function boot() {
       try {
-        supabase = createSupabaseClient(posToken);
+        sbClient = createSupabaseClient(posToken);
         const savedUser = localStorage.getItem('pos_user');
         if (posToken && savedUser) {
           currentUser = JSON.parse(savedUser);
@@ -471,12 +467,12 @@
       showLoginStatus('Authenticating with Supabase...', false);
 
       try {
-        if (!supabase) supabase = createSupabaseClient('');
+        if (!sbClient) sbClient = createSupabaseClient('');
 
         const username = document.getElementById('loginUsername').value.trim();
         const password = document.getElementById('loginPassword').value;
 
-        const { data, error } = await supabase.rpc('pos_login', {
+        const { data, error } = await sbClient.rpc('pos_login', {
           p_username: username,
           p_password: password
         });
@@ -490,7 +486,7 @@
         currentUser = data.user;
         localStorage.setItem('pos_token', posToken);
         localStorage.setItem('pos_user', JSON.stringify(currentUser));
-        supabase = createSupabaseClient(posToken);
+        sbClient = createSupabaseClient(posToken);
 
         showLoginStatus('Login verified! Loading branch workspace...', false);
         await enterApp();
@@ -508,7 +504,7 @@
       localStorage.removeItem('pos_user');
       posToken = '';
       currentUser = null;
-      if (branchRealtimeChannel && supabase) supabase.removeChannel(branchRealtimeChannel);
+      if (branchRealtimeChannel && sbClient) sbClient.removeChannel(branchRealtimeChannel);
       location.reload();
     }
 
@@ -534,7 +530,7 @@
 
     // -------------------- BRANCH CONTEXT & SWITCHER --------------------
     async function initBranchContext() {
-      const { data: branches, error } = await supabase
+      const { data: branches, error } = await sbClient
         .from('branches')
         .select('*')
         .eq('Active', true)
@@ -584,8 +580,8 @@
     }
 
     async function subscribeBranchRealtime(branchId) {
-      if (branchRealtimeChannel) await supabase.removeChannel(branchRealtimeChannel);
-      branchRealtimeChannel = supabase
+      if (branchRealtimeChannel) await sbClient.removeChannel(branchRealtimeChannel);
+      branchRealtimeChannel = sbClient
         .channel(`pos-branch-${branchId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurant_tables', filter: `BranchID=eq.${branchId}` }, () => loadTables())
         .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `BranchID=eq.${branchId}` }, () => { loadOpenOrders(); loadEodPreview(); })
@@ -608,7 +604,7 @@
 
     // -------------------- TABLES & POS --------------------
     async function loadTables() {
-      const { data, error } = await supabase
+      const { data, error } = await sbClient
         .from('restaurant_tables')
         .select('*')
         .eq('BranchID', activeBranchId)
@@ -644,7 +640,7 @@
       const num = prompt('Enter Table Number (e.g. T-05):');
       if (!num || !num.trim()) return;
       const cap = parseInt(prompt('Enter Seating Capacity:', '4') || '4', 10);
-      const { error } = await supabase.from('restaurant_tables').insert({
+      const { error } = await sbClient.from('restaurant_tables').insert({
         TableID: crypto.randomUUID(),
         BranchID: activeBranchId,
         TableNumber: num.trim(),
@@ -684,8 +680,8 @@
     }
 
     async function loadExistingOrderIntoCart(orderId) {
-      const { data: order } = await supabase.from('orders').select('*').eq('OrderID', orderId).single();
-      const { data: items } = await supabase.from('order_items').select('*').eq('OrderID', orderId);
+      const { data: order } = await sbClient.from('orders').select('*').eq('OrderID', orderId).single();
+      const { data: items } = await sbClient.from('order_items').select('*').eq('OrderID', orderId);
       if (order) {
         document.getElementById('discountType').value = order.DiscountType || 'None';
         document.getElementById('paxCount').value = order.PaxCount || 1;
@@ -707,7 +703,7 @@
 
     // -------------------- MENU --------------------
     async function loadBranchMenu() {
-      const { data, error } = await supabase
+      const { data, error } = await sbClient
         .from('v_branch_menu')
         .select('*')
         .eq('BranchID', activeBranchId)
@@ -883,12 +879,12 @@
       };
 
       if (isNew) {
-        const { error } = await supabase.from('orders').insert(orderPayload);
+        const { error } = await sbClient.from('orders').insert(orderPayload);
         if (error) return alert(error.message);
         activeOrderId = orderId;
       } else {
         delete orderPayload.OrderNumber;
-        const { error } = await supabase.from('orders').update(orderPayload).eq('OrderID', orderId);
+        const { error } = await sbClient.from('orders').update(orderPayload).eq('OrderID', orderId);
         if (error) return alert(error.message);
       }
 
@@ -906,13 +902,13 @@
           LineTotal: u.price * u.qty,
           KitchenStatus: 'Pending'
         }));
-        const { error: itemErr } = await supabase.from('order_items').insert(rows);
+        const { error: itemErr } = await sbClient.from('order_items').insert(rows);
         if (itemErr) return alert(itemErr.message);
         unsent.forEach(u => u.sent = true);
       }
 
       if (selectedTable) {
-        await supabase.from('restaurant_tables').update({ Status: 'Occupied', CurrentOrderID: orderId }).eq('TableID', selectedTable.TableID);
+        await sbClient.from('restaurant_tables').update({ Status: 'Occupied', CurrentOrderID: orderId }).eq('TableID', selectedTable.TableID);
       }
 
       renderCart();
@@ -947,7 +943,7 @@
       const tendered = parseFloat(document.getElementById('amountTendered').value || '0');
       if (tendered < totals.grandTotal) return alert('Amount tendered is less than Grand Total.');
 
-      const { error } = await supabase.from('orders').update({
+      const { error } = await sbClient.from('orders').update({
         Status: 'Paid',
         Subtotal: totals.subtotal,
         DiscountType: totals.discType,
@@ -969,7 +965,7 @@
       if (error) return alert(error.message);
 
       if (selectedTable) {
-        await supabase.from('restaurant_tables').update({ Status: 'Available', CurrentOrderID: null }).eq('TableID', selectedTable.TableID);
+        await sbClient.from('restaurant_tables').update({ Status: 'Available', CurrentOrderID: null }).eq('TableID', selectedTable.TableID);
       }
 
       closeCheckoutModal();
@@ -980,14 +976,14 @@
 
     // -------------------- KDS --------------------
     async function loadOpenOrders() {
-      const { data: orders } = await supabase
+      const { data: orders } = await sbClient
         .from('orders')
         .select('*')
         .eq('BranchID', activeBranchId)
         .eq('Status', 'Open')
         .order('CreatedAt', { ascending: true });
 
-      const { data: items } = await supabase
+      const { data: items } = await sbClient
         .from('order_items')
         .select('*')
         .eq('BranchID', activeBranchId)
@@ -1052,7 +1048,7 @@
 
     async function advanceKitchenStatus(orderItemId, currentStatus) {
       const next = currentStatus === 'Pending' ? 'Preparing' : 'Served';
-      const { error } = await supabase.from('order_items').update({ KitchenStatus: next }).eq('OrderItemID', orderItemId);
+      const { error } = await sbClient.from('order_items').update({ KitchenStatus: next }).eq('OrderItemID', orderItemId);
       if (error) return alert(error.message);
       await loadOpenOrders();
     }
@@ -1081,14 +1077,14 @@
     }
 
     async function toggleBranchMenuAvail(branchMenuId, avail) {
-      const { error } = await supabase.from('branch_menu_items').update({ Available: avail, UpdatedAt: new Date().toISOString() }).eq('BranchMenuID', branchMenuId);
+      const { error } = await sbClient.from('branch_menu_items').update({ Available: avail, UpdatedAt: new Date().toISOString() }).eq('BranchMenuID', branchMenuId);
       if (error) return alert(error.message);
       await loadBranchMenu();
     }
 
     async function updateBranchMenuOverride(branchMenuId, val) {
       const priceOverride = val === '' ? null : parseFloat(val);
-      const { error } = await supabase.from('branch_menu_items').update({ PriceOverride: priceOverride, UpdatedAt: new Date().toISOString() }).eq('BranchMenuID', branchMenuId);
+      const { error } = await sbClient.from('branch_menu_items').update({ PriceOverride: priceOverride, UpdatedAt: new Date().toISOString() }).eq('BranchMenuID', branchMenuId);
       if (error) return alert(error.message);
       await loadBranchMenu();
     }
@@ -1099,7 +1095,7 @@
 
     async function saveMasterMenuItem(e) {
       e.preventDefault();
-      const { error } = await supabase.from('menu_items').insert({
+      const { error } = await sbClient.from('menu_items').insert({
         ItemID: crypto.randomUUID(),
         Name: document.getElementById('newMenuName').value.trim(),
         Category: document.getElementById('newMenuCategory').value.trim(),
@@ -1115,7 +1111,7 @@
     // -------------------- END OF DAY --------------------
     async function loadEodPreview() {
       const today = new Date().toISOString().slice(0, 10);
-      const { data: paid } = await supabase
+      const { data: paid } = await sbClient
         .from('orders')
         .select('*')
         .eq('BranchID', activeBranchId)
@@ -1149,7 +1145,7 @@
       const actual = parseFloat(document.getElementById('eodActualCash').value || '0');
       const expected = opening + eodComputed.cashSales;
 
-      const { error } = await supabase.from('eod_reports').insert({
+      const { error } = await sbClient.from('eod_reports').insert({
         ReportID: crypto.randomUUID(),
         BranchID: activeBranchId,
         BusinessDate: new Date().toISOString().slice(0, 10),
@@ -1180,7 +1176,7 @@
     }
 
     async function loadUsers() {
-      const { data, error } = await supabase.from('users').select('*').order('FullName', { ascending: true });
+      const { data, error } = await sbClient.from('users').select('*').order('FullName', { ascending: true });
       if (error) throw error;
       usersList = data || [];
       const tbody = document.getElementById('usersTableBody');
@@ -1218,7 +1214,7 @@
 
     async function handleUserFormSubmit(e) {
       e.preventDefault();
-      const { error } = await supabase.rpc('pos_admin_save_user', {
+      const { error } = await sbClient.rpc('pos_admin_save_user', {
         p_user_id: document.getElementById('editUserId').value || null,
         p_full_name: document.getElementById('userFullName').value.trim(),
         p_username: document.getElementById('userUsername').value.trim(),
@@ -1235,7 +1231,7 @@
 
     async function openBranchManagerModal() {
       document.getElementById('branchManagerModal').classList.remove('hidden');
-      const { data } = await supabase.from('branches').select('*').order('BranchName', { ascending: true });
+      const { data } = await sbClient.from('branches').select('*').order('BranchName', { ascending: true });
       modalBranchesCache = data || [];
       document.getElementById('branchesModalList').innerHTML = modalBranchesCache.map(b => `
         <div class="py-2.5 flex items-center justify-between">
@@ -1268,7 +1264,7 @@
 
     async function saveBranchForm(e) {
       e.preventDefault();
-      const { error } = await supabase.rpc('pos_admin_save_branch', {
+      const { error } = await sbClient.rpc('pos_admin_save_branch', {
         p_branch_id: document.getElementById('editBranchId').value || null,
         p_branch_name: document.getElementById('branchNameInput').value.trim(),
         p_branch_code: document.getElementById('branchCodeInput').value.trim(),
