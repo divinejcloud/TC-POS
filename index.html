@@ -1109,7 +1109,7 @@
 /* ============================================================
    CONSTANTS & GLOBAL STATE
    ============================================================ */
-const APP_VERSION = 'v4.3.7-SB';
+const APP_VERSION = 'v4.4.0-SB-RT';
 const SESSION_HOURS = 12;
 const KDS_STATUSES = ['CONFIRMED_BY_COUNTER', 'ACCEPTED_BY_KITCHEN', 'PREPARING'];
 const FOOD_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
@@ -1119,7 +1119,7 @@ const FOOD_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
 const state = {
   user: null, token: null, settings: {}, categories: [], menu: [], menuById: {},
   tables: [], orders: [], users: [], stats: {}, currentView: 'waiter', cart: [],
-  pollTimer: null, polling: false, lastSync: null, version: null,
+  pollTimer: null, realtimeChannel: null, polling: false, lastSync: null, version: null,
   knownKdsOrderIds: new Set(), knownReadyOrderIds: new Set(), alertsPrimed: false,
   prepInputs: {}, activeCategoryFilter: 'ALL', queue: [], flushing: false, submitting: false, localPayments: {},
   eodGenerated: null
@@ -1130,7 +1130,7 @@ state.bootVer = null;
 state.adminLoadedAt = 0;
 
 /* ============================================================
-   SUPABASE CLIENT & BACKEND ADAPTER (Embedded Credentials)
+   SUPABASE CLIENT (Hardened Header Interceptor + Realtime)
    ============================================================ */
 const SUPABASE_URL = 'https://dhmekquviaoxxiqhxxih.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRobWVrcXV2aWFveHhpcWh4eGloIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTUwOTA2NTIsImV4cCI6MjExMDY2NjY1Mn0.rKdhiL4u9O477jlK5NapE-plNuvuzavyg6zXqgyL8Y4';
@@ -1139,18 +1139,24 @@ const sbClient = (function () {
   const cleanUrl = SUPABASE_URL.trim()
     .replace(/\/rest\/v1\/?$/i, '')
     .replace(/\/+$/, '');
-  return window.supabase.createClient(cleanUrl, SUPABASE_ANON_KEY.trim());
+  return window.supabase.createClient(cleanUrl, SUPABASE_ANON_KEY.trim(), {
+    global: {
+      fetch: (url, options = {}) => {
+        const headers = new Headers(options.headers || {});
+        if (state && state.token) headers.set('x-pos-token', state.token);
+        return fetch(url, { ...options, headers });
+      }
+    },
+    realtime: {
+      params: { eventsPerSecond: 10 }
+    }
+  });
 })();
 
 const SupabaseAPI = (function () {
   const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
   const safeNum = (v, fb = 0) => { const n = parseFloat(v); return isNaN(n) ? fb : n; };
   const validId = (id) => typeof id === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(id);
-
-  async function sha256Hex(str) {
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-  }
 
   function dateKeyInTz(iso, tz) {
     if (!iso) return '';
@@ -1223,7 +1229,7 @@ const SupabaseAPI = (function () {
     const rows = unwrap(await sb.from('sessions').select('*').eq('Token', token).limit(1));
     const s = rows && rows[0];
     if (!s || new Date(s.ExpiresAt) < new Date()) throw new Error('Invalid or expired session.');
-    const uRows = unwrap(await sb.from('users').select('*').eq('UserID', s.UserID).limit(1));
+    const uRows = unwrap(await sb.from('users').select('UserID, Username, FullName, Role, Active').eq('UserID', s.UserID).limit(1));
     const u = uRows && uRows[0];
     if (!u || !u.Active) throw new Error('Invalid or expired session.');
     return { valid: true, user: { userId: u.UserID, username: u.Username, fullName: u.FullName, role: u.Role } };
@@ -1286,24 +1292,12 @@ const SupabaseAPI = (function () {
   return {
     async loginUser(username, password) {
       const sb = checkSb();
-      const uname = String(username || '').trim().toLowerCase();
-      const users = unwrap(await sb.from('users').select('*'));
-      const u = (users || []).find(x => String(x.Username).toLowerCase() === uname && x.Active);
-      if (!u) return { success: false, message: 'Invalid username or password.' };
-
-      const hash = await sha256Hex(String(password || '') + u.Salt);
-      if (hash !== u.PasswordHash) return { success: false, message: 'Invalid username or password.' };
-
-      const token = uuid();
-      const expiresAt = new Date(Date.now() + SESSION_HOURS * 3600000).toISOString();
-      const user = { userId: u.UserID, username: u.Username, fullName: u.FullName, role: u.Role };
-
-      unwrap(await sb.from('sessions').insert({
-        SessionID: uuid(), UserID: u.UserID, Token: token, ExpiresAt: expiresAt, CreatedAt: new Date().toISOString()
-      }));
-      await sb.from('users').update({ LastLogin: new Date().toISOString() }).eq('UserID', u.UserID);
-      await logAct(u.UserID, 'LOGIN', 'User', u.UserID, 'Successful login');
-      return { success: true, token, expiresAt, user };
+      const { data, error } = await sb.rpc('pos_login', {
+        p_username: String(username || '').trim(),
+        p_password: String(password || '')
+      });
+      if (error) throw new Error(error.message);
+      return data;
     },
 
     async heartbeat(token) {
@@ -1322,17 +1316,14 @@ const SupabaseAPI = (function () {
     },
 
     async changePassword(token, oldPassword, newPassword) {
-      const session = await requireSession(token);
-      if (!newPassword || newPassword.length < 6) throw new Error('New password must be at least 6 characters.');
+      await requireSession(token);
       const sb = checkSb();
-      const u = unwrap(await sb.from('users').select('*').eq('UserID', session.user.userId).single());
-      const oldHash = await sha256Hex(oldPassword + u.Salt);
-      if (oldHash !== u.PasswordHash) throw new Error('Current password incorrect.');
-      const newSalt = uuid();
-      const newHash = await sha256Hex(newPassword + newSalt);
-      unwrap(await sb.from('users').update({ PasswordHash: newHash, Salt: newSalt }).eq('UserID', u.UserID));
-      await logAct(u.UserID, 'CHANGE_PASSWORD', 'User', u.UserID, 'Password updated');
-      return { success: true, message: 'Password changed successfully.' };
+      const { data, error } = await sb.rpc('pos_change_password', {
+        p_old_password: oldPassword,
+        p_new_password: newPassword
+      });
+      if (error) throw new Error(error.message);
+      return data;
     },
 
     async getBootstrapData(token) {
@@ -1742,29 +1733,18 @@ const SupabaseAPI = (function () {
     async saveUser(token, userObj) {
       const session = await requireAdmin(token);
       const sb = checkSb();
-      const isEdit = !!userObj.UserID;
-      const id = isEdit ? userObj.UserID : uuid();
-      const wanted = String(userObj.Username || '').trim().toLowerCase();
+      const wanted = String(userObj.Username || '').trim();
       if (!wanted) throw new Error('Username is required.');
-      const all = unwrap(await sb.from('users').select('UserID, Username'));
-      if ((all || []).some(u => String(u.Username).toLowerCase() === wanted && u.UserID !== id)) throw new Error('Username already exists.');
-
-      if (isEdit) {
-        const upd = { FullName: userObj.FullName, Username: userObj.Username, Role: userObj.Role };
-        if (userObj.NewPassword && userObj.NewPassword.length >= 6) {
-          const salt = uuid();
-          upd.Salt = salt; upd.PasswordHash = await sha256Hex(userObj.NewPassword + salt);
-        }
-        unwrap(await sb.from('users').update(upd).eq('UserID', id));
-      } else {
-        const salt = uuid();
-        unwrap(await sb.from('users').insert({
-          UserID: id, Username: userObj.Username, PasswordHash: await sha256Hex((userObj.Password || '123456') + salt),
-          Salt: salt, Role: userObj.Role, FullName: userObj.FullName, Active: true, CreatedAt: new Date().toISOString()
-        }));
-      }
-      await logAct(session.user.userId, 'SAVE_USER', 'User', id, userObj.Username);
-      return { success: true };
+      const { data, error } = await sb.rpc('pos_admin_save_user', {
+        p_user_id: userObj.UserID || '',
+        p_full_name: userObj.FullName,
+        p_username: wanted,
+        p_role: userObj.Role,
+        p_password: userObj.NewPassword || userObj.Password || ''
+      });
+      if (error) throw new Error(error.message);
+      await logAct(session.user.userId, 'SAVE_USER', 'User', userObj.UserID || wanted, wanted);
+      return data;
     },
 
     async getActivityLog(token, options = {}) {
@@ -1952,7 +1932,7 @@ const SupabaseAPI = (function () {
       const inDay = v => !!v && dateKeyInTz(v, tz) === dateStr;
 
       const [users, allOrders, allPayments, allItems, allLogs] = await Promise.all([
-        sb.from('users').select('*').then(unwrap),
+        sb.from('users').select('UserID, Username, FullName, Role, Active, LastLogin').then(unwrap),
         sb.from('orders').select('*').then(unwrap),
         sb.from('payments').select('*').then(unwrap),
         sb.from('order_items').select('*').then(unwrap),
@@ -2564,18 +2544,19 @@ async function resumeSession() {
   try {
     const auth = JSON.parse(saved);
     if (!auth || !auth.token || !auth.user) return false;
+    state.token = auth.token;
     if (!navigator.onLine) {
-      state.token = auth.token; state.user = auth.user; return true;
+      state.user = auth.user; return true;
     }
     try {
       const v = await callServerT(15000, 'heartbeat', auth.token);
-      if (!v || !v.valid) return false;
+      if (!v || !v.valid) { state.token = null; return false; }
       auth.user = v.user || auth.user;
     } catch (e) {
-      if (!e.isNetwork) return false;
+      if (!e.isNetwork) { state.token = null; return false; }
     }
-    state.token = auth.token; state.user = auth.user; return true;
-  } catch (e) { return false; }
+    state.user = auth.user; return true;
+  } catch (e) { state.token = null; return false; }
 }
 
 async function initSession() {
@@ -2667,7 +2648,7 @@ function applyPoll(data, silent) {
 }
 
 /* ============================================================
-   VIEW SWITCHING & POLLING
+   VIEW SWITCHING, REALTIME & POLLING
    ============================================================ */
 function switchView(view) {
   state.currentView = view;
@@ -2730,13 +2711,52 @@ async function poll(force) {
   } finally { state.polling = false; }
 }
 
+const triggerRealtimeSync = debounce(() => {
+  if (state.token && navigator.onLine) poll(true);
+}, 250);
+
+function startRealtime() {
+  stopRealtime();
+  if (!sbClient || !state.token) return;
+
+  sbClient.realtime.setAuth(state.token);
+  if (sbClient.realtime.headers) {
+    sbClient.realtime.headers['x-pos-token'] = state.token;
+  }
+
+  state.realtimeChannel = sbClient
+    .channel('pos-live-sync')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+      triggerRealtimeSync();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, () => {
+      triggerRealtimeSync();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurant_tables' }, () => {
+      triggerRealtimeSync();
+    })
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        updateSyncIndicator(true, true);
+      }
+    });
+}
+
+function stopRealtime() {
+  if (state.realtimeChannel && sbClient) {
+    sbClient.removeChannel(state.realtimeChannel);
+    state.realtimeChannel = null;
+  }
+}
+
 function startPolling() {
   stopPolling();
+  startRealtime();
   const loop = async () => {
     if (!state.token) return;
     await poll();
     if (!state.token) return;
-    state.pollTimer = setTimeout(loop, document.hidden ? 15000 : 4000);
+    state.pollTimer = setTimeout(loop, document.hidden ? 30000 : 15000);
   };
   loop();
 }
@@ -2744,18 +2764,22 @@ function startPolling() {
 function stopPolling() {
   if (state.pollTimer) clearTimeout(state.pollTimer);
   state.pollTimer = null;
+  stopRealtime();
 }
 
 document.addEventListener('visibilitychange', () => { if (!document.hidden && state.token) startPolling(); });
 window.addEventListener('online', () => { if (!state.token) return; updateSyncIndicator(false); startPolling(); });
 window.addEventListener('offline', () => { updateSyncIndicator(false); if (state.token) showOffline(); });
 
-function updateSyncIndicator(ok) {
+function updateSyncIndicator(ok, isLive) {
   const el = $('syncStatus');
   if (!el) return;
   const q = state.queue.length ? ` · ${state.queue.length} queued` : '';
+  const liveTag = (isLive || (state.realtimeChannel && state.realtimeChannel.state === 'joined'))
+    ? ' <span class="badge bg-success ms-1" style="font-size:0.65rem;">LIVE</span>'
+    : '';
   el.innerHTML = ok
-    ? `<i class="fa-solid fa-check text-success me-1"></i>Synced ${state.lastSync ? state.lastSync.toLocaleTimeString() : ''}${q}`
+    ? `<i class="fa-solid fa-check text-success me-1"></i>Synced ${state.lastSync ? state.lastSync.toLocaleTimeString() : ''}${liveTag}${q}`
     : (navigator.onLine
         ? `<i class="fa-solid fa-triangle-exclamation text-warning me-1"></i>Retrying…${q}`
         : `<i class="fa-solid fa-triangle-exclamation text-warning me-1"></i>Offline${q}`);
@@ -4233,187 +4257,93 @@ async function loadEODReport() {
     const txRows = txList.length ? txList.map(tx => `<tr><td>${tx.no}</td><td class="text-nowrap">${escapeHtml(tx.timeLabel)}</td><td><strong>${escapeHtml(tx.orderNumber)}</strong></td><td>${escapeHtml(tx.tableNumber)}</td><td>${escapeHtml(tx.customer)}</td><td>${escapeHtml(tx.methodLabel || tx.method)}</td><td>${tx.reference ? `<code>${escapeHtml(tx.reference)}</code>` : '<span class="text-muted">—</span>'}</td><td>${escapeHtml(tx.cashier)}</td><td class="text-end">${fmt(tx.paid)}</td><td class="text-end">${fmt(tx.change)}</td><td class="text-end"><strong>${fmt(tx.due)}</strong></td></tr>`).join('') : '<tr><td colspan="11" class="text-center text-muted py-3">No payments recorded for this date.</td></tr>';
     const refRows = refList.length ? refList.map(tx => `<tr><td>${escapeHtml(tx.timeLabel)}</td><td><strong>${escapeHtml(tx.orderNumber)}</strong></td><td>${escapeHtml(tx.methodLabel || tx.method)}</td><td>${tx.reference ? `<code>${escapeHtml(tx.reference)}</code>` : '<span class="badge bg-warning text-dark">MISSING</span>'}</td><td class="text-end">${fmt(tx.paid)}</td></tr>`).join('') : '<tr><td colspan="5" class="text-center text-muted py-2">No Card / GCash / Maya payments on this date.</td></tr>';
     const delivRows = delivList.length ? delivList.map(d => `<tr><td><strong>${escapeHtml(d.platform)}</strong></td><td class="text-center">${d.count}</td><td class="text-end">${fmt(d.amount)}</td></tr>`).join('') : '<tr><td colspan="3" class="text-center text-muted py-2">No Delivery payments on this date.</td></tr>';
-    const cashierRows = cashiers.length ? cashiers.map(ca => `<tr><td>${escapeHtml(ca.name)}</td><td class="text-center">${ca.count}</td><td class="text-end">${fmt(ca.amount)}</td></tr>`).join('') : '<tr><td colspan="3" class="text-center text-muted py-2">None</td></tr>';
-    const discRows = discounts.length ? discounts.map(d => `<tr><td class="text-nowrap">${escapeHtml(d.timeLabel)}</td><td><strong>${escapeHtml(d.orderNumber)}</strong></td><td>${escapeHtml(d.tableNumber)}</td><td>${escapeHtml(d.customer)}</td><td>${d.isSenior ? '<span class="badge bg-info text-dark">Senior/PWD</span>' : '<span class="badge bg-secondary">Manual</span>'}</td><td>${d.idNumber ? `<code>${escapeHtml(d.idNumber)}</code>` : '<span class="text-muted">—</span>'}</td><td class="text-center">${d.percent ? d.percent + '%' : '—'}</td><td class="text-end text-danger fw-bold">-${fmt(d.amount)}</td></tr>`).join('') : '<tr><td colspan="8" class="text-center text-muted py-2">No discounts applied on this date.</td></tr>';
-    const itemRows = items.length ? items.map(it => `<tr><td>${escapeHtml(it.name)}</td><td class="text-end">${fmt(it.unitPrice)}</td><td class="text-center">${it.quantity}</td><td class="text-end">${fmt(it.total)}</td></tr>`).join('') : '<tr><td colspan="4" class="text-center text-muted py-2">No items sold.</td></tr>';
-    const loginRows = logins.length ? logins.map(u => `<tr><td><strong>${escapeHtml(u.name)}</strong></td><td>${escapeHtml(u.role)}</td><td class="text-center">${u.logins}</td><td>${escapeHtml(u.firstLogin)}</td><td>${escapeHtml(u.lastLogin)}</td></tr>`).join('') : '<tr><td colspan="5" class="text-center text-muted py-2">No logins recorded for this date.</td></tr>';
+    const cashierRows = cashiers.length ? cashiers.map(ca => `<tr><td>${escapeHtml(ca.name)}</td><td class="text-center">${ca.count}</td><td class="text-end">${fmt(ca.amount)}</td></tr>`).join('') : '<tr><td colspan="3" class="text-center text-muted py-2">—</td></tr>';
+    const discountRows = discounts.length ? discounts.map(d => `<tr><td class="text-nowrap">${escapeHtml(d.timeLabel)}</td><td><strong>${escapeHtml(d.orderNumber)}</strong></td><td>${escapeHtml(d.customer)}</td><td>${d.isSenior ? '<span class="badge bg-primary">Senior / PWD</span>' : '<span class="badge bg-secondary">Manual</span>'}</td><td>${d.idNumber ? `<code>${escapeHtml(d.idNumber)}</code>` : '<span class="text-muted">—</span>'}</td><td class="text-end">${d.percent ? d.percent + '%' : '—'}</td><td class="text-end text-danger">-${fmt(d.amount)}</td><td class="small text-muted">${escapeHtml(d.reason || '—')}</td></tr>`).join('') : '<tr><td colspan="8" class="text-center text-muted py-2">No discounts applied on this date.</td></tr>';
+    const itemRows = items.length ? items.map(it => `<tr><td>${escapeHtml(it.name)}</td><td class="text-end">${fmt(it.unitPrice)}</td><td class="text-center">${it.quantity}</td><td class="text-end"><strong>${fmt(it.total)}</strong></td></tr>`).join('') : '<tr><td colspan="4" class="text-center text-muted py-2">No items sold.</td></tr>';
+    const loginRows = logins.length ? logins.map(u => `<tr><td><strong>${escapeHtml(u.name)}</strong></td><td><span class="badge bg-secondary">${escapeHtml(u.role)}</span></td><td class="text-center">${u.logins}</td><td>${escapeHtml(u.firstLogin)}</td><td>${escapeHtml(u.lastLogin)}</td></tr>`).join('') : '<tr><td colspan="5" class="text-center text-muted py-2">No login records found for this date.</td></tr>';
 
     $('eodReport').innerHTML = `
-      <div id="eodPrintable" class="border rounded bg-white p-3 p-md-4">
-        <div class="d-flex flex-wrap justify-content-between align-items-start border-bottom pb-3 mb-3">
-          <div>
-            <h4 class="fw-bold mb-1">${escapeHtml(data.restaurantName)}</h4>
-            <div class="text-muted small">END OF DAY REPORT &bull; <strong>${escapeHtml(data.reportNo)}</strong></div>
-          </div>
-          <div class="text-md-end small">
-            <div>Business Date: <strong>${escapeHtml(data.date)}</strong></div>
-            <div>Generated: <strong>${escapeHtml(data.generatedLabel)}</strong></div>
-            <div>Generated By: <strong>${escapeHtml(data.generatedBy)}</strong></div>
-          </div>
+      <div class="border rounded p-3 bg-white">
+        <div class="d-flex justify-content-between align-items-start border-bottom pb-2 mb-3">
+          <div><h5 class="fw-bold mb-0">${escapeHtml(data.restaurantName)} — End of Day Report</h5><div class="small text-muted">Report #: <strong>${escapeHtml(data.reportNo)}</strong> &bull; Business Date: <strong>${escapeHtml(data.date)}</strong></div></div>
+          <div class="text-end small text-muted"><div>Generated: ${escapeHtml(data.generatedLabel || '')}</div><div>By: <strong>${escapeHtml(data.generatedBy)}</strong></div></div>
         </div>
-
         <div class="row g-2 mb-3">
-          <div class="col-6 col-md-3"><div class="stat-card bg-primary"><h6>Total Sales</h6><h4>${fmt(t.sales)}</h4></div></div>
-          <div class="col-6 col-md-3"><div class="stat-card bg-success"><h6>Paid Orders</h6><h4>${oc.paid || 0}</h4></div></div>
-          <div class="col-6 col-md-3"><div class="stat-card bg-warning"><h6>Avg Order</h6><h4>${fmt(t.averageOrder)}</h4></div></div>
-          <div class="col-6 col-md-3"><div class="stat-card bg-info"><h6>Total Collected</h6><h4>${fmt(data.totalCollected)}</h4></div></div>
+          <div class="col-6 col-md-3"><div class="border rounded p-2 bg-light"><div class="small text-muted">Net Sales</div><div class="fs-5 fw-bold text-success">${fmt(t.sales)}</div></div></div>
+          <div class="col-6 col-md-3"><div class="border rounded p-2 bg-light"><div class="small text-muted">Paid Orders</div><div class="fs-5 fw-bold">${oc.paid || 0}</div></div></div>
+          <div class="col-6 col-md-3"><div class="border rounded p-2 bg-light"><div class="small text-muted">Average Order</div><div class="fs-5 fw-bold">${fmt(t.averageOrder)}</div></div></div>
+          <div class="col-6 col-md-3"><div class="border rounded p-2 bg-light"><div class="small text-muted">Cash Change Given</div><div class="fs-5 fw-bold text-secondary">${fmt(data.totalChange)}</div></div></div>
         </div>
-
-        <div class="row g-3 mb-3">
-          <div class="col-md-6">
-            <h6 class="fw-bold border-bottom pb-1">Sales Breakdown</h6>
-            <table class="table table-sm mb-0">
-              <tr><td>Gross Subtotal</td><td class="text-end">${fmt(t.subtotal)}</td></tr>
-              ${Number(t.lessVat || 0) > 0 ? `<tr><td>Less: VAT (Senior/PWD)</td><td class="text-end text-danger">-${fmt(t.lessVat)}</td></tr>` : ''}
-              <tr><td>Discounts</td><td class="text-end text-danger">-${fmt(t.discount)}</td></tr>
-              <tr><td>Service Charge</td><td class="text-end">${fmt(t.serviceCharge)}</td></tr>
-              <tr><td>Tax / VAT</td><td class="text-end">${fmt(t.tax)}</td></tr>
-              ${Number(t.vatableSales || 0) > 0 ? `<tr><td>VATable Sales</td><td class="text-end">${fmt(t.vatableSales)}</td></tr>` : ''}
-              ${Number(t.vatExemptSales || 0) > 0 ? `<tr><td>VAT-Exempt Sales</td><td class="text-end">${fmt(t.vatExemptSales)}</td></tr>` : ''}
-              <tr class="table-light fw-bold"><td>Net Sales</td><td class="text-end">${fmt(t.sales)}</td></tr>
-              <tr><td>Change Given</td><td class="text-end">${fmt(data.totalChange)}</td></tr>
-              <tr class="fw-bold"><td>Net Cash/Payments</td><td class="text-end">${fmt(data.totalNet)}</td></tr>
-            </table>
-          </div>
-          <div class="col-md-6">
-            <h6 class="fw-bold border-bottom pb-1">Payment Method Totals</h6>
-            <table class="table table-sm mb-2">
-              <thead><tr><th>Method</th><th class="text-center">Count</th><th class="text-end">Amount</th></tr></thead>
-              <tbody>${methodRows}</tbody>
-              <tfoot><tr class="table-light fw-bold"><td>Total</td><td class="text-center">${txList.length}</td><td class="text-end">${fmt(data.totalCollected)}</td></tr></tfoot>
-            </table>
-          </div>
-        </div>
-
-        <h6 class="fw-bold border-bottom pb-1 mt-3">Transactions (${txList.length})</h6>
-        <div class="table-responsive mb-3">
-          <table class="table table-sm table-bordered align-middle mb-0">
-            <thead class="table-light"><tr><th>#</th><th>Time</th><th>Order #</th><th>Table</th><th>Customer</th><th>Method</th><th>Reference #</th><th>Cashier</th><th class="text-end">Paid</th><th class="text-end">Change</th><th class="text-end">Due</th></tr></thead>
-            <tbody>${txRows}</tbody>
-          </table>
-        </div>
-
-        <div class="row g-3 mb-3">
-          <div class="col-md-7">
-            <h6 class="fw-bold border-bottom pb-1">Electronic Payment References (Card / GCash / Maya)</h6>
-            <div class="table-responsive">
-              <table class="table table-sm table-bordered align-middle mb-0">
-                <thead class="table-light"><tr><th>Time</th><th>Order #</th><th>Method</th><th>Reference #</th><th class="text-end">Amount</th></tr></thead>
-                <tbody>${refRows}</tbody>
-              </table>
-            </div>
-          </div>
-          <div class="col-md-5">
-            <h6 class="fw-bold border-bottom pb-1">Delivery Platforms</h6>
-            <table class="table table-sm table-bordered align-middle mb-3">
-              <thead class="table-light"><tr><th>Platform</th><th class="text-center">Count</th><th class="text-end">Amount</th></tr></thead>
-              <tbody>${delivRows}</tbody>
-            </table>
-            <h6 class="fw-bold border-bottom pb-1">Collections by Cashier</h6>
-            <table class="table table-sm table-bordered align-middle mb-0">
-              <thead class="table-light"><tr><th>Cashier</th><th class="text-center">Count</th><th class="text-end">Collected</th></tr></thead>
-              <tbody>${cashierRows}</tbody>
-            </table>
-          </div>
-        </div>
-
-        <h6 class="fw-bold border-bottom pb-1 mt-3">Discounts &amp; Senior Citizen / PWD (${discounts.length})</h6>
-        <div class="table-responsive mb-3">
-          <table class="table table-sm table-bordered align-middle mb-0">
-            <thead class="table-light"><tr><th>Time</th><th>Order #</th><th>Table</th><th>Customer</th><th>Type</th><th>ID #</th><th class="text-center">%</th><th class="text-end">Discount</th></tr></thead>
-            <tbody>${discRows}</tbody>
-            <tfoot><tr class="table-light fw-bold"><td colspan="7">Total Discounts</td><td class="text-end text-danger">-${fmt(data.discountTotal)}</td></tr></tfoot>
-          </table>
-        </div>
-
-        <div class="row g-3">
-          <div class="col-md-7">
-            <h6 class="fw-bold border-bottom pb-1">Items Sold (${data.itemsTotalQty || 0} pcs)</h6>
-            <div class="table-responsive">
-              <table class="table table-sm table-bordered align-middle mb-0">
-                <thead class="table-light"><tr><th>Item</th><th class="text-end">Price</th><th class="text-center">Qty</th><th class="text-end">Total</th></tr></thead>
-                <tbody>${itemRows}</tbody>
-                <tfoot><tr class="table-light fw-bold"><td colspan="2">Total</td><td class="text-center">${data.itemsTotalQty || 0}</td><td class="text-end">${fmt(data.itemsTotalAmount)}</td></tr></tfoot>
-              </table>
-            </div>
-          </div>
-          <div class="col-md-5">
-            <h6 class="fw-bold border-bottom pb-1">Logged-In Users (${logins.length})</h6>
-            <div class="table-responsive">
-              <table class="table table-sm table-bordered align-middle mb-0">
-                <thead class="table-light"><tr><th>User</th><th>Role</th><th class="text-center">Logins</th><th>First</th><th>Last</th></tr></thead>
-                <tbody>${loginRows}</tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+        <h6 class="fw-bold mt-3">1. Sales Breakdown</h6>
+        <table class="table table-sm table-bordered"><tbody>
+          <tr><td>Gross Subtotal</td><td class="text-end">${fmt(t.subtotal)}</td></tr>
+          ${Number(t.lessVat || 0) > 0 ? `<tr><td>Less: VAT-Exempt</td><td class="text-end text-danger">-${fmt(t.lessVat)}</td></tr>` : ''}
+          <tr><td>Discounts (${oc.discounted || 0} order(s))</td><td class="text-end text-danger">-${fmt(t.discount)}</td></tr>
+          <tr><td>Service Charge</td><td class="text-end">${fmt(t.serviceCharge)}</td></tr>
+          <tr><td>VAT / Tax</td><td class="text-end">${fmt(t.tax)}</td></tr>
+          <tr class="table-dark"><td><strong>Net Sales</strong></td><td class="text-end"><strong>${fmt(t.sales)}</strong></td></tr>
+        </tbody></table>
+        <h6 class="fw-bold mt-3">2. Payment Methods Summary</h6>
+        <table class="table table-sm table-bordered"><thead><tr><th>Method</th><th class="text-center">Transactions</th><th class="text-end">Total Collected</th></tr></thead><tbody>${methodRows}</tbody><tfoot><tr class="table-secondary"><th>Total Collected</th><th class="text-center">${txList.length}</th><th class="text-end">${fmt(data.totalCollected)}</th></tr></tfoot></table>
+        <h6 class="fw-bold mt-3">3. Cashier Collections &amp; Delivery Summary</h6>
+        <div class="row g-3"><div class="col-md-6"><table class="table table-sm table-bordered"><thead><tr><th>Cashier</th><th class="text-center">Txns</th><th class="text-end">Amount</th></tr></thead><tbody>${cashierRows}</tbody></table></div><div class="col-md-6"><table class="table table-sm table-bordered"><thead><tr><th>Delivery Platform</th><th class="text-center">Orders</th><th class="text-end">Amount</th></tr></thead><tbody>${delivRows}</tbody></table></div></div>
+        <h6 class="fw-bold mt-3">4. Non-Cash Reference Numbers (Card / GCash / Maya)</h6>
+        <table class="table table-sm table-bordered"><thead><tr><th>Time</th><th>Order #</th><th>Method</th><th>Reference #</th><th class="text-end">Amount</th></tr></thead><tbody>${refRows}</tbody></table>
+        <h6 class="fw-bold mt-3">5. Discounts &amp; Senior Citizen / PWD IDs</h6>
+        <table class="table table-sm table-bordered"><thead><tr><th>Time</th><th>Order #</th><th>Customer</th><th>Type</th><th>ID #</th><th class="text-end">%</th><th class="text-end">Amount</th><th>Details</th></tr></thead><tbody>${discountRows}</tbody><tfoot><tr class="table-secondary"><th colspan="6">Total Discounts (${discounts.length})</th><th class="text-end text-danger">-${fmt(data.discountTotal)}</th><th></th></tr></tfoot></table>
+        <h6 class="fw-bold mt-3">6. Payment Transactions</h6>
+        <div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr><th>#</th><th>Time</th><th>Order #</th><th>Table</th><th>Customer</th><th>Method</th><th>Ref #</th><th>Cashier</th><th class="text-end">Paid</th><th class="text-end">Change</th><th class="text-end">Net</th></tr></thead><tbody>${txRows}</tbody></table></div>
+        <h6 class="fw-bold mt-3">7. Items Sold</h6>
+        <table class="table table-sm table-bordered"><thead><tr><th>Item</th><th class="text-end">Unit Price</th><th class="text-center">Qty</th><th class="text-end">Total</th></tr></thead><tbody>${itemRows}</tbody><tfoot><tr class="table-secondary"><th colspan="2">Total Items</th><th class="text-center">${data.itemsTotalQty || 0}</th><th class="text-end">${fmt(data.itemsTotalAmount)}</th></tr></tfoot></table>
+        <h6 class="fw-bold mt-3">8. Staff Logins</h6>
+        <table class="table table-sm table-bordered mb-0"><thead><tr><th>Staff Name</th><th>Role</th><th class="text-center">Logins</th><th>First Login</th><th>Last Login</th></tr></thead><tbody>${loginRows}</tbody></table>
       </div>`;
-    state.eodGenerated = data.date;
+    state.eodGenerated = { date: data.date, at: Date.now() };
   } catch (e) { hideLoading(); toast(e.message, 'danger'); }
 }
 
 function printEODReport() {
-  const el = $('eodPrintable');
-  if (!el) return toast('Generate the End of Day report first.', 'warning');
-  const win = window.open('', '_blank', 'width=900,height=700');
-  if (!win) return toast('Pop-up blocked. Allow pop-ups to print.', 'warning');
-  win.document.write(`<!DOCTYPE html><html><head><title>End of Day Report</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-      @page { size: A4; margin: 12mm; }
-      body { font-family: Arial, sans-serif; font-size: 11px; color: #000; padding: 10px; }
-      .stat-card { color: #000 !important; background: #f8f9fa !important; border: 1px solid #ccc; padding: 8px; border-radius: 6px; }
-      .stat-card h6 { font-size: 10px; text-transform: uppercase; margin: 0 0 2px; }
-      .stat-card h4 { font-size: 15px; margin: 0; font-weight: bold; }
-      .badge { border: 1px solid #666; color: #000 !important; background: #fff !important; }
-      table { font-size: 10px; }
-    </style></head>
-    <body onload="window.print(); window.close();">${el.innerHTML}</body></html>`);
+  const el = $('eodReport');
+  if (!el || !el.innerHTML.trim()) return toast('Generate the End of Day report first.', 'warning');
+  const win = window.open('', '_blank', 'width=900,height=900');
+  if (!win) return toast('Pop-up blocked. Please allow pop-ups to print.', 'warning');
+  win.document.write(`<!DOCTYPE html><html><head><title>End of Day Report</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"><style>body{padding:16px;font-size:12px;color:#000}@media print{body{padding:0}}</style></head><body onload="setTimeout(function(){window.print();window.close();},350)">${el.innerHTML}</body></html>`);
   win.document.close();
 }
 
 async function closePOS() {
-  if (!navigator.onLine) return toast('You must be online to close the POS.', 'warning');
   const d = $('eodDate').value || todayStr();
-  if (state.eodGenerated !== d) { showModal('eodRequiredModal'); return; }
-  if (!confirm(`CLOSE POS FOR ${d}?\n\nThis will:\n1. Download a JSON backup of today's orders.\n2. Clear all orders, order items, and payments for a clean start.\n3. Mark all tables Available.`)) return;
-
+  if (!state.eodGenerated || state.eodGenerated.date !== d) { showModal('eodRequiredModal'); return; }
+  if (!confirm(`Are you sure you want to close POS for ${d}?\n\nThis will:\n• Download a JSON backup of today's orders\n• Reset active orders and tables for tomorrow`)) return;
   try {
-    showLoading('Closing POS & downloading backup…');
-    const res = await callServer('archiveAndResetPOS', state.token, d);
-    showDone('POS Closed!', () => {
-      toast(res.message, 'success');
-      $('eodReport').innerHTML = ''; state.eodGenerated = null;
-      clearSalesReportUI(); loadAdminStats(); poll(true);
-    });
+    showLoading('Archiving orders and resetting POS…');
+    const r = await callServer('archiveAndResetPOS', state.token, d);
+    state.eodGenerated = null;
+    $('eodReport').innerHTML = '';
+    clearSalesReportUI();
+    showDone(r.message, () => { loadAdminStats(); poll(true); });
   } catch (e) { hideLoading(); toast(e.message, 'danger'); }
 }
 
 async function restoreSelectedBackup() {
-  const fileInput = $('backupFileInput');
-  const file = fileInput && fileInput.files[0];
-  if (!file) return toast('Please choose a JSON backup file first.', 'warning');
-  if (!confirm(`RESTORE POS FROM "${file.name}"?\n\nThis will overwrite current active orders, items, and payments with the selected backup.`)) return;
-
+  const input = $('backupFileInput');
+  if (!input.files || !input.files[0]) return toast('Please choose a JSON backup file first.', 'warning');
+  if (!confirm(`⚠️ WARNING: Restoring this backup will overwrite current active orders and payments with data from the JSON file.\n\nProceed with restoration?`)) return;
   try {
-    showLoading('Restoring data from backup file…');
-    const text = await file.text();
-    const parsed = JSON.parse(text);
-    const res = await callServer('restorePOSFromBackup', state.token, parsed);
-    showDone('Restore Completed!', () => {
-      toast(res.message, 'success');
-      fileInput.value = '';
-      loadAdminStats(); poll(true);
-    });
+    showLoading('Restoring transactional data…');
+    const text = await input.files[0].text();
+    const json = JSON.parse(text);
+    const res = await callServer('restorePOSFromBackup', state.token, json);
+    showDone(res.message, () => { input.value = ''; loadAdminStats(); poll(true); });
   } catch (e) { hideLoading(); toast(e.message, 'danger'); }
 }
 
 async function triggerManualPrune() {
-  if (!confirm('Run 30-day database cleanup now?\n\nExpired sessions and activity logs older than 30 days will be permanently deleted.')) return;
+  if (!confirm('Delete expired sessions and activity logs older than 30 days?')) return;
   try {
-    showLoading('Cleaning old logs & sessions…');
+    showLoading('Pruning old logs…');
     const res = await callServer('pruneOldPOSBackups', state.token);
-    showDone('Cleanup Done!', () => toast(`Deleted ${res.deletedCount} expired log record(s).`, 'success'));
+    showDone(`Pruned ${res.deletedCount} old log(s).`, () => loadActivityLogs());
   } catch (e) { hideLoading(); toast(e.message, 'danger'); }
 }
 
@@ -4421,28 +4351,43 @@ async function downloadZipBackup() {
   try {
     showLoading('Generating CSV ZIP archive…');
     const res = await callServer('exportDatabaseAsZip', state.token);
-    if (!res.success || !res.base64Data) throw new Error('ZIP export failed.');
-
-    const byteCharacters = atob(res.base64Data);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
+    hideLoading();
+    if (!res || !res.base64Data) throw new Error('Invalid ZIP payload received.');
+    const byteChars = atob(res.base64Data);
+    const byteNumbers = new Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
     const blob = new Blob([new Uint8Array(byteNumbers)], { type: 'application/zip' });
-
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = res.fileName;
-    document.body.appendChild(link); link.click(); document.body.removeChild(link);
-
-    showDone('ZIP Downloaded!', () => toast(`Exported ${res.fileName}`, 'success'));
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = res.fileName;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    toast('ZIP archive downloaded!', 'success');
   } catch (e) { hideLoading(); toast(e.message, 'danger'); }
 }
 
 async function triggerDbSetup() {
   try {
     showLoading('Verifying database…');
-    const res = await callServer('setupDatabase', state.token);
-    showDone(res.message || 'Database ready!', () => loadBootstrap());
+    const r = await callServer('setupDatabase', state.token);
+    showDone(r.message, loadBootstrap);
   } catch (e) { hideLoading(); toast(e.message, 'danger'); }
+}
+
+function openHelpModal() { showModal('helpModal'); }
+
+function printSystemHelpGuide() {
+  const modalBody = document.querySelector('#helpModal .modal-body');
+  if (!modalBody) return toast('Manual content not found.', 'warning');
+  const win = window.open('', '_blank', 'width=320,height=600');
+  if (!win) return toast('Pop-up blocked. Please allow pop-ups to print.', 'warning');
+  const cloned = modalBody.cloneNode(true);
+  cloned.querySelectorAll('.nav-pills').forEach(el => el.remove());
+  cloned.querySelectorAll('.tab-pane').forEach(el => {
+    el.classList.add('show', 'active'); el.style.display = 'block';
+    el.style.borderBottom = '1px dashed #000'; el.style.paddingBottom = '8px'; el.style.marginBottom = '10px';
+  });
+  win.document.write(`<!DOCTYPE html><html><head><title>Operations Guide</title><style>@page{size:80mm auto;margin:0}body{font-family:'Courier New',monospace;font-size:11px;margin:0;padding:8px;width:270px;color:#000;line-height:1.3}</style></head><body onload="window.print();window.close();"><div style="text-align:center;font-weight:bold;font-size:14px;">*** OPERATIONS MANUAL ***</div>${cloned.innerHTML}</body></html>`);
+  win.document.close();
 }
 
 function openChangePasswordModal() { showModal('changePwModal'); }
@@ -4451,40 +4396,18 @@ async function submitChangePassword() {
   if (n1 !== n2) return toast('New passwords do not match.', 'warning');
   try {
     showLoading('Updating…');
-    const res = await callServer('changePassword', state.token, o, n1);
-    showDone(res.message, () => hideModal('changePwModal'));
+    await callServer('changePassword', state.token, o, n1);
+    showDone('Password changed!', () => hideModal('changePwModal'));
   } catch (e) { hideLoading(); toast(e.message, 'danger'); }
 }
 
 /* ============================================================
-   HELP MANUAL MODAL & THERMAL PRINT
-   ============================================================ */
-function openHelpModal() { showModal('helpModal'); }
-function printSystemHelpGuide() {
-  const restName = escapeHtml(state.settings.RESTAURANT_NAME || 'RESTAURANT POS');
-  const win = window.open('', '_blank', 'width=340,height=650');
-  if (!win) return toast('Pop-up blocked. Allow pop-ups to print.', 'warning');
-  win.document.write(`<!DOCTYPE html><html><head><title>POS Manual</title>
-    <style>@page { size: 80mm auto; margin: 0; } body { font-family: 'Courier New', monospace; font-size: 11px; margin: 0; padding: 10px; width: 280px; color: #000; } .hr { border-bottom: 1px dashed #000; margin: 6px 0; }</style>
-    </head><body onload="window.print(); window.close();">
-      <div style="text-align:center;font-weight:bold;">${restName}<br>POS QUICK REFERENCE</div>
-      <div class="hr"></div>
-      <div>1. Waiter: + New Order -> Submit</div>
-      <div>2. Counter: Pay & Confirm -> Receipt</div>
-      <div>3. Kitchen: Accept -> Prep -> Ready</div>
-      <div>4. Waiter: Serve -> Clean Table</div>
-      <div class="hr"></div>
-      <div style="text-align:center;">Printed: ${new Date().toLocaleDateString()}</div>
-    </body></html>`);
-  win.document.close();
-}
-
-/* ============================================================
-   INITIALIZATION
+   INIT
    ============================================================ */
 window.addEventListener('DOMContentLoaded', async () => {
   $('loginVersion').textContent = APP_VERSION;
-  if (await resumeSession()) initSession();
+  if (await resumeSession()) { initSession(); return; }
+  $('loginScreen').style.display = 'flex';
 });
 </script>
 </body>
