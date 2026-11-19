@@ -10,6 +10,9 @@
 <title>Restaurant Management System</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="config.js"></script>
 <style>
   :root {
     --primary-color: #1e293b;
@@ -572,22 +575,15 @@
 
               <div class="card card-pos p-3 mb-4 border-warning">
                 <h5 class="fw-bold text-dark mb-3"><i class="fa-solid fa-rotate-left text-warning me-2"></i>Restore Database from Backup</h5>
-                <p class="small text-muted mb-2">Select a previous Google Drive backup spreadsheet to restore historical Orders, OrderItems, and Payments.</p>
+                <p class="small text-muted mb-2">Upload a previously exported POS JSON backup file to restore historical Orders, OrderItems, and Payments.</p>
                 
                 <div class="row g-2">
-                  <div class="col-md-7">
-                    <select class="form-select" id="backupSelect">
-                      <option value="">-- Click "Fetch Backups" to load files --</option>
-                    </select>
+                  <div class="col-md-9">
+                    <input type="file" class="form-control" id="backupFileInput" accept=".json">
                   </div>
                   <div class="col-md-3">
-                    <button class="btn btn-outline-secondary w-100" onclick="loadDriveBackupsList()">
-                      <i class="fa-solid fa-arrows-rotate me-1"></i>Fetch Backups
-                    </button>
-                  </div>
-                  <div class="col-md-2">
                     <button class="btn btn-warning fw-bold w-100" onclick="restoreSelectedBackup()">
-                      Restore
+                      <i class="fa-solid fa-upload me-1"></i>Restore File
                     </button>
                   </div>
                 </div>
@@ -597,12 +593,12 @@
                 <div class="col-md-6">
                   <div class="card card-pos p-3 h-100 border-secondary">
                     <div class="d-flex justify-content-between align-items-center mb-2">
-                      <h6 class="fw-bold mb-0"><i class="fa-solid fa-trash-can text-danger me-2"></i>30-Day Storage Prune</h6>
+                      <h6 class="fw-bold mb-0"><i class="fa-solid fa-trash-can text-danger me-2"></i>30-Day Database Prune</h6>
                       <button class="btn btn-sm btn-outline-danger fw-bold" onclick="triggerManualPrune()">
-                        Prune Old Backups
+                        Prune Old Logs
                       </button>
                     </div>
-                    <p class="small text-muted mb-0">Clean up backup spreadsheets in Google Drive older than 30 days to optimize storage.</p>
+                    <p class="small text-muted mb-0">Clean up expired sessions and activity logs older than 30 days in Supabase to optimize storage.</p>
                   </div>
                 </div>
 
@@ -614,7 +610,7 @@
                         Download ZIP
                       </button>
                     </div>
-                    <p class="small text-muted mb-0">Export all spreadsheet tables as individual CSV files inside a compressed ZIP file.</p>
+                    <p class="small text-muted mb-0">Export all database tables as individual CSV files inside a compressed ZIP file.</p>
                   </div>
                 </div>
               </div>
@@ -798,8 +794,6 @@
         </ul>
 
         <div class="tab-content">
-
-          <!-- OVERVIEW -->
           <div class="tab-pane fade show active" id="helpOverview">
             <h6 class="fw-bold text-primary mb-2">User Roles &amp; Screens</h6>
             <div class="table-responsive mb-3">
@@ -813,7 +807,6 @@
                 </tbody>
               </table>
             </div>
-
             <h6 class="fw-bold text-primary mb-2">Order Lifecycle</h6>
             <ol class="small text-muted mb-3">
               <li><strong>PENDING COUNTER</strong> – order created, waiting at the Counter. Table: <em>Waiting for Counter Confirmation</em>.</li>
@@ -823,139 +816,47 @@
               <li><strong>SERVED</strong> – delivered to the guest. Table: <em>Needs Cleaning</em>, then tap it to make it <em>Available</em>.</li>
               <li><strong>CANCELLED</strong> – rejected at the Counter (only possible before payment) or merged into another order.</li>
             </ol>
-
-            <h6 class="fw-bold text-primary mb-2">Table Colors</h6>
-            <ul class="small text-muted mb-3">
-              <li><span class="badge bg-success">Available</span> free to use or reserve &nbsp;
-                  <span class="badge text-white" style="background-color:#6f42c1;">Reserved</span> held for a guest</li>
-              <li><span class="badge bg-danger">Occupied / Waiting</span> in use &nbsp;
-                  <span class="badge bg-info">Preparing</span> kitchen cooking</li>
-              <li><span class="badge bg-primary">Ready to Serve</span> food is ready &nbsp;
-                  <span class="badge bg-warning text-dark">Needs Cleaning</span> clear and reset</li>
-            </ul>
-
-            <h6 class="fw-bold text-primary mb-2">First-Time Setup (Admin)</h6>
-            <ol class="small text-muted mb-0">
-              <li>Sign in with the default account <code>admin</code> / <code>admin123</code> and immediately use <strong>Change Password</strong> (top-right user menu).</li>
-              <li>Admin Setting → <strong>Settings</strong>: restaurant name, tax, service charge, Senior/PWD %, currency, timezone, receipt footer.</li>
-              <li>Create <strong>Categories</strong>, then <strong>Menu</strong> items (price, station, picture), then <strong>Tables</strong>.</li>
-              <li>Create <strong>Users</strong> for every waiter, counter and kitchen staff member.</li>
-              <li>In the Apps Script editor run <code>setupNightlyBackupTrigger</code> once to enable the automatic midnight backup.</li>
-            </ol>
           </div>
-
-          <!-- DASHBOARD -->
           <div class="tab-pane fade" id="helpWaiter">
             <h6 class="fw-bold text-primary mb-2">Dashboard Operations Workflow</h6>
-            <ol class="small text-muted mb-3">
-              <li><strong>Create Order:</strong> tap <code>+ New Order</code>, choose an <em>Available</em> table in the Basket (leave empty for Takeout), pick a category pill or use <em>Search menu</em>, and tap items to add them. Use <code>×</code> to remove a line. Tap <code>Submit Order</code> – the order goes to the Counter.</li>
-              <li><strong>Table cards:</strong> tap an <em>Available</em> table to reserve it. Tap a <em>Reserved</em> table to manage or clear the reservation. Tap a <em>Needs Cleaning</em> table to mark it clean. Tapping an in-use table frees it (asks for confirmation).</li>
-              <li><strong>Reservations:</strong> enter the guest / customer name, then <code>Mark Reserved</code>. The name shows on the table card. Tap a reserved table to edit the name, <code>Clear Reservation</code>, or <code>Transfer</code> the reservation to another Available table. A table that is in use cannot be reserved.</li>
-              <li><strong>Grid / List:</strong> the <code>Grid</code> / <code>List</code> buttons beside <em>Merge Tables</em> switch Active Orders between order cards and a compact table. The choice is remembered on this device.</li>
-              <li><strong>Active Orders list:</strong> shows order #, table, customer, waiter, item count, total, status and ETA countdown (red <em>LATE</em> when overdue). A cloud icon means the order is saved on this device and waiting to sync.</li>
-              <li><strong>Serve:</strong> the <code>Serve</code> button appears when the order is <em>READY</em> (or, if the Kitchen Display is disabled, as soon as it is paid).</li>
-              <li><strong>Transfer:</strong> <code>Transfer</code> moves an open order to another <em>Available</em> table; the old table is freed automatically.</li>
-              <li><strong>Merge Tables:</strong> <code>Merge Tables</code> moves all items from the <em>Source</em> table into the <em>Target</em> table order and frees the source table. Needs at least two active table orders.</li>
-              <li><strong>Ready alert:</strong> a pop-up and chime tell you when the kitchen finishes an order – tap <code>Acknowledge &amp; Serve</code>, then serve the food.</li>
+            <ol class="small text-muted mb-0">
+              <li><strong>Create Order:</strong> tap <code>+ New Order</code>, choose an <em>Available</em> table in the Basket (leave empty for Takeout), tap items, then <code>Submit Order</code>.</li>
+              <li><strong>Table cards:</strong> tap Available to reserve; Reserved to manage/clear; Needs Cleaning to mark clean.</li>
+              <li><strong>Serve / Transfer / Merge:</strong> manage active orders directly from the Dashboard list or grid.</li>
             </ol>
           </div>
-
-          <!-- COUNTER -->
           <div class="tab-pane fade" id="helpCounter">
             <h6 class="fw-bold text-primary mb-2">Counter &amp; Billing Workflow</h6>
-            <ol class="small text-muted mb-3">
-              <li><strong>View mode:</strong> use the <code>Grid</code> / <code>List</code> buttons beside <em>New Order</em> to switch between card view and a compact table. Your choice is remembered on this device.</li>
-              <li><strong>Top cards:</strong> Pending Confirmation, In Kitchen / Serving (or Paid / To Serve), Unpaid Orders and Served Total.</li>
-              <li><strong>Pending orders (yellow):</strong> <code>Pay &amp; Confirm</code> opens payment. <code>Reject</code> cancels the order (reason required) and frees the table.</li>
-              <li><strong>Payment window:</strong>
-                <ul>
-                  <li>Enter an optional customer name.</li>
-                  <li><em>Senior Citizen / PWD</em> switch: ID # is required; the Senior/PWD % applies to the subtotal and replaces the manual discount.</li>
-                  <li><em>Manual discount</em>: up to 50% with a reason.</li>
-                  <li><em>Delivery</em> switch (Food Panda, GrabFood, Maxim, Others): recorded as Delivery, paid exactly (no change). Put the delivery order # in Reference #.</li>
-                  <li><strong>Philippine VAT:</strong> menu prices include 12% VAT by default (Settings → <em>Menu prices already include VAT</em>). Regular discounts come off the price and VAT is computed on what the customer pays. <em>Senior/PWD</em>: VAT is removed first (price ÷ 1.12), then 20% is deducted from the VAT-exclusive price, and the sale is VAT-exempt. Service charge is computed on the discounted amount. The receipt shows VATable Sales, VAT-Exempt Sales and VAT.</li>
-                  <li>Enter <em>Amount Received</em> – Change is computed automatically. Choose Cash, Card, GCash or PayMaya and add a Reference # for non-cash.</li>
-                </ul>
-              </li>
-              <li><strong>Confirm Payment:</strong> saves the payment, sends the ticket to the kitchen and opens the receipt preview. Press <code>Print Receipt</code>.</li>
-              <li><strong>Paid orders (blue):</strong> <code>Reprint Receipt</code> and <code>Kitchen Ticket</code> are available any time.</li>
-              <li><strong>Unpaid orders (red):</strong> orders that are READY/SERVED but unpaid show <code>Process Payment</code>.</li>
-              <li><strong>Print Kitchen Ticket:</strong> shows a preview; press <code>Print Kitchen Ticket</code> (80mm thermal). Use this to send orders to the kitchen when the KDS is disabled.</li>
-              <li><strong>Printer type:</strong> receipt and kitchen ticket previews have a printer selector – <em>Thermal Printer (80mm)</em> for receipt printers or <em>Standard Printer (A4 / Letter)</em> for regular office printers. The choice is remembered on this device.</li>
+            <ol class="small text-muted mb-0">
+              <li><strong>Pay &amp; Confirm:</strong> apply Senior/PWD (VAT removed first, then discount applied, VAT-exempt) or manual discounts, select payment method or Delivery platform, and print receipt.</li>
+              <li><strong>Kitchen Ticket:</strong> print 80mm or A4 kitchen tickets at any time.</li>
             </ol>
           </div>
-
-          <!-- KITCHEN -->
           <div class="tab-pane fade" id="helpKitchen">
-            <h6 class="fw-bold text-primary mb-2">Kitchen Display System (KDS) Workflow</h6>
-            <ol class="small text-muted mb-3">
-              <li>A chime and alert sound when the Counter confirms a new order. Each card shows ticket #, table, time, server and items with their station.</li>
-              <li><strong>Accept Order:</strong> tap <code>Accept Order</code> to acknowledge.</li>
-              <li><strong>Start Prep:</strong> enter the preparation time in minutes (default 15) and tap <code>Start Prep</code>. An ETA countdown starts; it turns red and shows <em>LATE</em> when overdue. The table becomes <em>Preparing</em>.</li>
-              <li><strong>Mark Ready:</strong> tap <code>Mark Ready</code> when cooked. Waiters and the Counter get an alert; the table becomes <em>Ready to Serve</em>.</li>
-              <li>The red counter at the top shows how many orders are active.</li>
-              <li>If the administrator disables the KDS, the Kitchen screen is hidden and paid orders go straight to serving – rely on printed kitchen tickets.</li>
+            <h6 class="fw-bold text-primary mb-2">Kitchen Display System (KDS)</h6>
+            <ol class="small text-muted mb-0">
+              <li>Accept incoming confirmed tickets, enter prep minutes, start prep, and mark ready when cooked.</li>
             </ol>
           </div>
-
-          <!-- ADMIN -->
           <div class="tab-pane fade" id="helpAdmin">
             <h6 class="fw-bold text-primary mb-2">Admin Setting Operations</h6>
-            <ul class="small text-muted mb-3">
-              <li><strong>Stat cards:</strong> all-time Total Sales, Total Orders, Average Order Value and Tax Collected.</li>
-              <li><strong>Settings:</strong> restaurant name, tax % (checkbox enables/disables), service charge % (checkbox), currency, timezone, receipt footer, Senior/PWD discount %, and <em>Disable Kitchen Display System</em>. Click <code>Save Settings</code> to apply. <code>Reset Database</code> only recreates missing sheets and default data – it does not delete existing records.</li>
-              <li><strong>Menu:</strong> add or edit items (name, category, price, station, availability, picture). Pictures are compressed automatically. Unavailable items are hidden from ordering.</li>
-              <li><strong>Tables:</strong> add, edit or delete tables. A table with an active order cannot be deleted.</li>
-              <li><strong>Categories:</strong> add menu categories; they appear as pills when ordering.</li>
-              <li><strong>Users:</strong> add staff with a role (Admin, Waiter, Counter, Kitchen). A blank password defaults to <code>123456</code> – ask staff to change it. Passwords must be at least 6 characters.</li>
-              <li><strong>Activity Log:</strong> latest 300 actions (logins, orders, payments, settings). Use <code>Refresh Logs</code> to reload.</li>
+            <ul class="small text-muted mb-0">
+              <li>Configure restaurant name, VAT, service charge, Senior/PWD %, KDS mode, menu items, tables, categories, and staff accounts.</li>
             </ul>
           </div>
-
-          <!-- REPORTS & EOD -->
           <div class="tab-pane fade" id="helpEOD">
-            <h6 class="fw-bold text-primary mb-2">Sales Report</h6>
-            <ul class="small text-muted mb-3">
-              <li>Pick Start/End dates (or use <em>Today, Last 7 Days, This Month, All Time</em>) and press <code>Generate</code>.</li>
-              <li>Shows net sales, gross subtotal, discounts, tax, service charge, items sold, average order, best day, peak hour, cancelled and open orders.</li>
-              <li>Breakdowns by payment method, delivery platform, category, station, hour, waiter and cashier, plus discounts (Senior/PWD vs manual).</li>
-              <li>Top Items, Daily Sales and a full Order Details list. <code>Export CSV</code> downloads the order details for Excel.</li>
-            </ul>
-
-            <h6 class="fw-bold text-primary mb-2">End of Day &amp; Maintenance</h6>
-            <ol class="small text-muted mb-3">
-              <li>Choose the <em>Business Date</em> and press <code>Generate Report</code>. Review it, then <code>Print</code> (shows payments by method, cashier totals, all transactions, reference #s, Senior/PWD discounts, items sold and logins).</li>
-              <li>Press <code>Close POS for the Day</code>. The report must be generated first. Closing makes a Google Drive backup, clears all orders, items and payments, and resets every table to Available. Make sure no offline changes are pending.</li>
-              <li><strong>Restore:</strong> <code>Fetch Backups</code>, select a file, press <code>Restore</code>. This replaces current Orders, OrderItems and Payments with the backup.</li>
-              <li><strong>Prune:</strong> <code>Prune Old Backups</code> moves backups older than 30 days to the Drive trash (also done automatically at night).</li>
-              <li><strong>Download ZIP:</strong> exports all sheets (except sessions) as CSV files in one ZIP.</li>
-              <li><strong>Automatic backup:</strong> once the trigger is installed, a backup is created every midnight (Asia/Manila by default).</li>
+            <h6 class="fw-bold text-primary mb-2">Reports &amp; End of Day</h6>
+            <ol class="small text-muted mb-0">
+              <li>Generate Sales Reports or EOD Reports, print them, and close the POS for the day (downloads a JSON backup archive and resets daily orders/tables).</li>
             </ol>
           </div>
-
-          <!-- TIPS -->
           <div class="tab-pane fade" id="helpTips">
-            <h6 class="fw-bold text-primary mb-2">Offline Mode</h6>
-            <ul class="small text-muted mb-3">
-              <li>If the connection drops, orders, payments and status changes are saved on this device and a red banner appears. They sync automatically, in order, when the connection returns.</li>
-              <li>The top bar shows <em>Synced</em>, <em>Retrying…</em> or <em>Offline</em> with the number of queued changes.</li>
-              <li>You must be online to sign in. Do not log out with unsynced changes.</li>
-            </ul>
-
-            <h6 class="fw-bold text-primary mb-2">Troubleshooting</h6>
+            <h6 class="fw-bold text-primary mb-2">Offline &amp; Troubleshooting</h6>
             <ul class="small text-muted mb-0">
-              <li><strong>Cannot sign in:</strong> after 5 wrong attempts wait a few minutes. Admin can add a new password via Users.</li>
-              <li><strong>"Invalid or expired session":</strong> sessions last 12 hours – sign in again.</li>
-              <li><strong>Printing does nothing:</strong> allow pop-ups for this site.</li>
-              <li><strong>Data looks old:</strong> the screen refreshes every few seconds; check the sync indicator.</li>
-              <li><strong>Table stuck:</strong> tap the table card to free it (or Transfer / Merge the order).</li>
-              <li><strong>Menu picture will not upload:</strong> choose a smaller image; large pictures are compressed but very large ones are rejected.</li>
-              <li><strong>Wrong sale recorded:</strong> restore from the latest backup (Admin → End of Day &amp; Maintenance).</li>
+              <li>Offline changes queue locally in IndexedDB and sync automatically once reconnected.</li>
             </ul>
           </div>
-
         </div>
-
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary w-100 fw-bold" data-bs-dismiss="modal">Close Manual</button>
@@ -1205,12 +1106,12 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="config.js"></script>
 <script>
 /* ============================================================
    CONSTANTS & GLOBAL STATE
    ============================================================ */
-const APP_VERSION = 'v4.3.6';
+const APP_VERSION = 'v4.3.6-SB';
+const SESSION_HOURS = 12;
 const KDS_STATUSES = ['CONFIRMED_BY_COUNTER', 'ACCEPTED_BY_KITCHEN', 'PREPARING'];
 const FOOD_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150"><rect width="150" height="150" fill="#cccccc"/>' +
@@ -1225,9 +1126,1061 @@ const state = {
   eodGenerated: null
 };
 state.counterView = (lsGet('pos_counter_view') === 'list') ? 'list' : 'grid';
-state.dashView = (lsGet('pos_dash_view') === 'grid') ? 'grid' : 'list'; // Dashboard keeps its original list by default
+state.dashView = (lsGet('pos_dash_view') === 'grid') ? 'grid' : 'list';
 state.bootVer = null;
 state.adminLoadedAt = 0;
+
+/* ============================================================
+   SUPABASE CLIENT & BACKEND ADAPTER (Replaces Code.gs)
+   ============================================================ */
+const sbClient = (function () {
+  const cfg = window.SUPABASE_CONFIG || {};
+  if (!cfg.URL || cfg.URL.includes('YOUR_PROJECT_ID')) {
+    console.warn('Supabase config missing in config.js');
+    return null;
+  }
+  return window.supabase.createClient(cfg.URL, cfg.ANON_KEY);
+})();
+
+const SupabaseAPI = (function () {
+  const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+  const safeNum = (v, fb = 0) => { const n = parseFloat(v); return isNaN(n) ? fb : n; };
+  const validId = (id) => typeof id === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(id);
+
+  async function sha256Hex(str) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  function dateKeyInTz(iso, tz) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+    } catch (e) {
+      return d.toISOString().slice(0, 10);
+    }
+  }
+
+  function timeLabelInTz(iso, tz) {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    try {
+      return new Intl.DateTimeFormat('en-US', { timeZone: tz || 'Asia/Manila', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(d);
+    } catch (e) {
+      return d.toLocaleTimeString();
+    }
+  }
+
+  function hourInTz(iso, tz) {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return -1;
+    try {
+      const h = parseInt(new Intl.DateTimeFormat('en-US', { timeZone: tz || 'Asia/Manila', hour: 'numeric', hour12: false }).format(d), 10);
+      return isNaN(h) ? -1 : (h === 24 ? 0 : h);
+    } catch (e) {
+      return d.getHours();
+    }
+  }
+
+  function checkSb() {
+    if (!sbClient) throw new Error('Supabase is not configured. Edit config.js with your Supabase URL and Anon Key.');
+    return sbClient;
+  }
+
+  function unwrap(res) {
+    if (res.error) throw new Error(res.error.message || 'Database error');
+    return res.data;
+  }
+
+  async function logAct(userId, action, entityType, entityId, newValue) {
+    try {
+      const sb = checkSb();
+      await sb.from('activity_logs').insert({
+        LogID: uuid(),
+        Timestamp: new Date().toISOString(),
+        UserID: userId || 'SYSTEM',
+        Action: action,
+        EntityType: entityType || '',
+        EntityID: entityId || '',
+        NewValue: typeof newValue === 'object' ? JSON.stringify(newValue) : String(newValue || '')
+      });
+    } catch (e) { console.warn('Log error:', e); }
+  }
+
+  async function getSettingsObj() {
+    const sb = checkSb();
+    const rows = unwrap(await sb.from('settings').select('*'));
+    const out = {};
+    (rows || []).forEach(r => { out[r.SettingKey] = r.SettingValue; });
+    return out;
+  }
+
+  async function requireSession(token) {
+    if (!token) throw new Error('Invalid or expired session.');
+    const sb = checkSb();
+    const rows = unwrap(await sb.from('sessions').select('*').eq('Token', token).limit(1));
+    const s = rows && rows[0];
+    if (!s || new Date(s.ExpiresAt) < new Date()) throw new Error('Invalid or expired session.');
+    const uRows = unwrap(await sb.from('users').select('*').eq('UserID', s.UserID).limit(1));
+    const u = uRows && uRows[0];
+    if (!u || !u.Active) throw new Error('Invalid or expired session.');
+    return { valid: true, user: { userId: u.UserID, username: u.Username, fullName: u.FullName, role: u.Role } };
+  }
+
+  async function requireAdmin(token) {
+    const s = await requireSession(token);
+    if (s.user.role !== 'Admin') throw new Error('Admin access required.');
+    return s;
+  }
+
+  function serverComputeBill(settings, gross, isSenior, manualPct) {
+    settings = settings || {};
+    const taxPct = (settings.TAX_RATE_PERCENT !== undefined && settings.TAX_RATE_PERCENT !== '') ? safeNum(settings.TAX_RATE_PERCENT, 12) : 12;
+    const srvPct = (settings.SERVICE_CHARGE_PERCENT !== undefined && settings.SERVICE_CHARGE_PERCENT !== '') ? safeNum(settings.SERVICE_CHARGE_PERCENT, 5) : 5;
+    const enableTax = (settings.ENABLE_TAX !== 'false') && (taxPct > 0);
+    const enableSrv = (settings.ENABLE_SERVICE_CHARGE !== 'false') && (srvPct > 0);
+    const inclusive = settings.VAT_INCLUSIVE !== 'false';
+    const seniorPct = Math.min(100, Math.max(0, safeNum(settings.SENIOR_PWD_DISCOUNT_PERCENT, 20)));
+    const vr = taxPct / 100, sr = enableSrv ? srvPct / 100 : 0;
+
+    gross = round2(gross);
+    let discount = 0, lessVat = 0, base = 0, service = 0, vat = 0, total = 0, vatableSales = 0, vatExemptSales = 0;
+
+    if (isSenior) {
+      if (enableTax && inclusive) {
+        const vatEx = round2(gross / (1 + vr));
+        lessVat = round2(gross - vatEx);
+        discount = round2(vatEx * seniorPct / 100);
+        base = round2(vatEx - discount);
+      } else {
+        discount = round2(gross * seniorPct / 100);
+        base = round2(gross - discount);
+      }
+      service = round2(base * sr);
+      total = round2(base + service);
+      vatExemptSales = total;
+    } else {
+      const pct = Math.min(Math.max(0, safeNum(manualPct, 0)), 50);
+      discount = round2(gross * pct / 100);
+      base = round2(gross - discount);
+      service = round2(base * sr);
+      if (enableTax) {
+        if (inclusive) {
+          total = round2(base + service);
+          vatableSales = round2(total / (1 + vr));
+          vat = round2(total - vatableSales);
+        } else {
+          vatableSales = round2(base + service);
+          vat = round2(vatableSales * vr);
+          total = round2(vatableSales + vat);
+        }
+      } else {
+        total = round2(base + service);
+      }
+    }
+    return { gross, discount, lessVat, service, vat, total, vatableSales, vatExemptSales, seniorPct };
+  }
+
+  return {
+    async loginUser(username, password) {
+      const sb = checkSb();
+      const uname = String(username || '').trim().toLowerCase();
+      const users = unwrap(await sb.from('users').select('*'));
+      const u = (users || []).find(x => String(x.Username).toLowerCase() === uname && x.Active);
+      if (!u) return { success: false, message: 'Invalid username or password.' };
+
+      const hash = await sha256Hex(String(password || '') + u.Salt);
+      if (hash !== u.PasswordHash) return { success: false, message: 'Invalid username or password.' };
+
+      const token = uuid();
+      const expiresAt = new Date(Date.now() + SESSION_HOURS * 3600000).toISOString();
+      const user = { userId: u.UserID, username: u.Username, fullName: u.FullName, role: u.Role };
+
+      unwrap(await sb.from('sessions').insert({
+        SessionID: uuid(), UserID: u.UserID, Token: token, ExpiresAt: expiresAt, CreatedAt: new Date().toISOString()
+      }));
+      await sb.from('users').update({ LastLogin: new Date().toISOString() }).eq('UserID', u.UserID);
+      await logAct(u.UserID, 'LOGIN', 'User', u.UserID, 'Successful login');
+      return { success: true, token, expiresAt, user };
+    },
+
+    async heartbeat(token) {
+      try { return await requireSession(token); } catch (e) { return { valid: false }; }
+    },
+
+    async logoutUser(token) {
+      if (!token) return { success: true };
+      const sb = checkSb();
+      const rows = unwrap(await sb.from('sessions').select('*').eq('Token', token));
+      if (rows && rows[0]) {
+        await sb.from('sessions').update({ ExpiresAt: new Date(0).toISOString() }).eq('Token', token);
+        await logAct(rows[0].UserID, 'LOGOUT', 'User', rows[0].UserID, 'User logged out');
+      }
+      return { success: true };
+    },
+
+    async changePassword(token, oldPassword, newPassword) {
+      const session = await requireSession(token);
+      if (!newPassword || newPassword.length < 6) throw new Error('New password must be at least 6 characters.');
+      const sb = checkSb();
+      const u = unwrap(await sb.from('users').select('*').eq('UserID', session.user.userId).single());
+      const oldHash = await sha256Hex(oldPassword + u.Salt);
+      if (oldHash !== u.PasswordHash) throw new Error('Current password incorrect.');
+      const newSalt = uuid();
+      const newHash = await sha256Hex(newPassword + newSalt);
+      unwrap(await sb.from('users').update({ PasswordHash: newHash, Salt: newSalt }).eq('UserID', u.UserID));
+      await logAct(u.UserID, 'CHANGE_PASSWORD', 'User', u.UserID, 'Password updated');
+      return { success: true, message: 'Password changed successfully.' };
+    },
+
+    async getBootstrapData(token) {
+      const session = await requireSession(token);
+      const sb = checkSb();
+      const isAdmin = session.user.role === 'Admin';
+      const [settings, categories, menuItems, tables] = await Promise.all([
+        getSettingsObj(),
+        sb.from('categories').select('*').order('SortOrder', { ascending: true }).then(unwrap),
+        sb.from('menu_items').select('*').then(unwrap),
+        sb.from('restaurant_tables').select('*').order('TableNumber', { ascending: true }).then(unwrap)
+      ]);
+      let users = [];
+      if (isAdmin) {
+        const rawUsers = unwrap(await sb.from('users').select('UserID, Username, FullName, Role, Active, LastLogin'));
+        users = rawUsers || [];
+      }
+      return { settings, categories: categories || [], menuItems: menuItems || [], tables: tables || [], users, version: String(Date.now()) };
+    },
+
+    async getPolledUpdates(token) {
+      await requireSession(token);
+      const sb = checkSb();
+      const [tables, allOrders, allItems, settings] = await Promise.all([
+        sb.from('restaurant_tables').select('*').order('TableNumber', { ascending: true }).then(unwrap),
+        sb.from('orders').select('*').order('CreatedAt', { ascending: true }).then(unwrap),
+        sb.from('order_items').select('*').then(unwrap),
+        getSettingsObj()
+      ]);
+
+      const closed = { COMPLETED: 1, CANCELLED: 1, VOIDED: 1 };
+      const activeOrders = [];
+      const activeIds = {};
+      let served = 0;
+
+      (allOrders || []).forEach(o => {
+        if (o.OrderStatus === 'SERVED' || o.OrderStatus === 'COMPLETED') served++;
+        if (!closed[o.OrderStatus]) {
+          o.items = [];
+          activeOrders.push(o);
+          activeIds[o.OrderID] = o;
+        }
+      });
+
+      (allItems || []).forEach(i => {
+        if (activeIds[i.OrderID]) activeIds[i.OrderID].items.push(i);
+      });
+
+      const stats = { pending: 0, kitchen: 0, ready: 0, served };
+      activeOrders.forEach(o => {
+        if (o.OrderStatus === 'PENDING_COUNTER') stats.pending++;
+        else if (['CONFIRMED_BY_COUNTER', 'ACCEPTED_BY_KITCHEN', 'PREPARING'].includes(o.OrderStatus)) stats.kitchen++;
+        else if (o.OrderStatus === 'READY') stats.ready++;
+      });
+
+      return { version: String(Date.now()), tables: tables || [], orders: activeOrders, stats, settings };
+    },
+
+    async createOrder(token, payload) {
+      const session = await requireSession(token);
+      if (!payload || !payload.items || !payload.items.length) throw new Error('Order has no items.');
+      const sb = checkSb();
+
+      const orderId = validId(payload.clientId) ? payload.clientId : uuid();
+      const existing = unwrap(await sb.from('orders').select('OrderID, OrderNumber').eq('OrderID', orderId));
+      if (existing && existing[0]) {
+        return { success: true, orderId, orderNumber: existing[0].OrderNumber, duplicate: true };
+      }
+
+      const menuRows = unwrap(await sb.from('menu_items').select('*'));
+      const menuById = {};
+      (menuRows || []).forEach(m => { menuById[m.MenuItemID] = m; });
+
+      let grossSubtotal = 0;
+      const lines = payload.items.map(it => {
+        const m = menuById[it.menuItemId];
+        const qty = Math.max(1, Math.floor(safeNum(it.quantity, 1)));
+        const price = m ? safeNum(m.Price) : safeNum(it.price);
+        grossSubtotal += price * qty;
+        return {
+          menuItemId: it.menuItemId,
+          name: m ? m.ItemName : it.itemName,
+          price,
+          qty,
+          station: (m && m.Station) || it.station || 'Kitchen'
+        };
+      });
+
+      const orderNum = 'ORD-' + String(Date.now()).slice(-6);
+      const nowIso = new Date().toISOString();
+      const isCounter = ['Counter', 'Admin'].includes(session.user.role);
+
+      unwrap(await sb.from('orders').insert({
+        OrderID: orderId, OrderNumber: orderNum,
+        TableID: payload.tableId || '', TableNumber: payload.tableNumber || '',
+        CustomerName: 'Walk-In Customer',
+        WaiterID: session.user.userId, WaiterName: session.user.fullName,
+        CounterID: isCounter ? session.user.userId : '', CounterName: isCounter ? session.user.fullName : '',
+        Subtotal: grossSubtotal, Discount: 0, DiscountReason: '', Tax: 0, ServiceCharge: 0, GrandTotal: grossSubtotal,
+        OrderStatus: 'PENDING_COUNTER', PaymentStatus: 'UNPAID', AmountPaid: 0,
+        EstimatedPreparationMinutes: 15, CreatedAt: nowIso, UpdatedAt: nowIso
+      }));
+
+      unwrap(await sb.from('order_items').insert(lines.map(l => ({
+        OrderItemID: uuid(), OrderID: orderId, MenuItemID: l.menuItemId,
+        ItemNameSnapshot: l.name, UnitPriceSnapshot: l.price, Quantity: l.qty,
+        Station: l.station, Status: 'PENDING', CreatedAt: nowIso
+      }))));
+
+      if (payload.tableId) {
+        await sb.from('restaurant_tables').update({ Status: 'Waiting for Counter Confirmation' }).eq('TableID', payload.tableId);
+      }
+
+      await logAct(session.user.userId, 'CREATE_ORDER', 'Order', orderId, { orderNum, subtotal: grossSubtotal });
+      return { success: true, orderId, orderNumber: orderNum };
+    },
+
+    async transitionOrder(token, orderId, action, params = {}) {
+      const session = await requireSession(token);
+      const roles = {
+        REJECT_COUNTER: ['Counter', 'Admin'],
+        ACCEPT_KITCHEN: ['Kitchen', 'Admin'],
+        START_PREP: ['Kitchen', 'Admin'],
+        MARK_READY: ['Kitchen', 'Admin'],
+        SERVE: ['Waiter', 'Counter', 'Admin']
+      };
+      const rank = { PENDING_COUNTER: 0, CONFIRMED_BY_COUNTER: 1, ACCEPTED_BY_KITCHEN: 2, PREPARING: 3, READY: 4, SERVED: 5, COMPLETED: 6 };
+      const targetMap = { ACCEPT_KITCHEN: 'ACCEPTED_BY_KITCHEN', START_PREP: 'PREPARING', MARK_READY: 'READY', SERVE: 'SERVED' };
+
+      if (!roles[action]) throw new Error('Unknown action.');
+      if (!roles[action].includes(session.user.role)) throw new Error('Your role cannot perform this action.');
+
+      const sb = checkSb();
+      const o = unwrap(await sb.from('orders').select('*').eq('OrderID', orderId).single());
+      const cur = o.OrderStatus;
+      const update = { UpdatedAt: new Date().toISOString() };
+
+      if (action === 'REJECT_COUNTER') {
+        if (cur === 'CANCELLED') return { success: true, skipped: true };
+        if (cur !== 'PENDING_COUNTER') throw new Error('Order can no longer be rejected.');
+        update.OrderStatus = 'CANCELLED';
+        if (o.TableID) await sb.from('restaurant_tables').update({ Status: 'Available' }).eq('TableID', o.TableID);
+      } else {
+        if (cur === 'CANCELLED' || cur === 'VOIDED') throw new Error('Order was cancelled.');
+        const target = targetMap[action];
+        if ((rank[cur] || 0) >= rank[target]) return { success: true, skipped: true };
+        update.OrderStatus = target;
+
+        if (action === 'START_PREP') {
+          const mins = safeNum(params.prepMinutes, 15);
+          update.EstimatedPreparationMinutes = mins;
+          update.EstimatedCompletionTime = new Date(Date.now() + mins * 60000).toISOString();
+          if (o.TableID) await sb.from('restaurant_tables').update({ Status: 'Preparing' }).eq('TableID', o.TableID);
+        } else if (action === 'MARK_READY') {
+          if (o.TableID) await sb.from('restaurant_tables').update({ Status: 'Ready to Serve' }).eq('TableID', o.TableID);
+        } else if (action === 'SERVE') {
+          if (o.TableID) await sb.from('restaurant_tables').update({ Status: 'Needs Cleaning' }).eq('TableID', o.TableID);
+        }
+      }
+
+      unwrap(await sb.from('orders').update(update).eq('OrderID', orderId));
+      await logAct(session.user.userId, 'ORDER_' + action, 'Order', orderId, update);
+      return { success: true };
+    },
+
+    async processPayment(token, payload) {
+      const session = await requireSession(token);
+      if (!['Counter', 'Admin'].includes(session.user.role)) throw new Error('Counter or Admin access required.');
+      const sb = checkSb();
+      const o = unwrap(await sb.from('orders').select('*').eq('OrderID', payload.orderId).single());
+      if (o.OrderStatus === 'CANCELLED' || o.OrderStatus === 'VOIDED') throw new Error('Order was cancelled.');
+
+      const settings = await getSettingsObj();
+      const grossSubtotal = safeNum(o.Subtotal);
+      const isSeniorPwd = payload.isSeniorPwd === true || payload.isSeniorPwd === 'true';
+      const isDelivery = payload.isDelivery === true || payload.isDelivery === 'true';
+      const deliveryPlatform = isDelivery ? String(payload.deliveryPlatform || '').trim() : '';
+      if (isDelivery && !deliveryPlatform) throw new Error('Please select or enter the delivery platform.');
+
+      const method = isDelivery ? 'Delivery' : (payload.paymentMethod || 'Cash');
+      const seniorPwdId = isSeniorPwd ? String(payload.seniorPwdId || '').trim() : '';
+      const manualPct = Math.min(Math.max(0, safeNum(payload.discount, 0)), 50);
+      const bill = serverComputeBill(settings, grossSubtotal, isSeniorPwd, manualPct);
+
+      const discountPct = isSeniorPwd ? bill.seniorPct : manualPct;
+      let discountReason = payload.discountReason || '';
+      if (isSeniorPwd) {
+        discountReason = seniorPwdId ? `Senior/PWD ${bill.seniorPct}% Off (ID: ${seniorPwdId})` : `Senior Citizen / PWD ${bill.seniorPct}% Off`;
+      }
+
+      const due = round2(bill.total - safeNum(o.AmountPaid));
+      if (due <= 0.004) return { success: true, changeAmount: 0, alreadyPaid: true };
+
+      let received = safeNum(payload.amountReceived);
+      if (isDelivery) received = due;
+      if (received + 0.001 < due) throw new Error('Insufficient payment amount. Remaining due: ' + due.toFixed(2));
+
+      const change = round2(received - due);
+      const newTotalPaid = round2(safeNum(o.AmountPaid) + due);
+
+      unwrap(await sb.from('payments').insert({
+        PaymentID: uuid(), OrderID: payload.orderId, AmountPaid: received,
+        PaymentMethod: method, ReferenceNumber: payload.referenceNumber || '',
+        ProcessedByID: session.user.userId, ChangeAmount: change,
+        CreatedAt: new Date().toISOString(), DeliveryPlatform: deliveryPlatform
+      }));
+
+      const isConfirmed = o.OrderStatus === 'PENDING_COUNTER';
+      unwrap(await sb.from('orders').update({
+        CustomerName: payload.customerName || o.CustomerName || 'Walk-In Customer',
+        Subtotal: grossSubtotal, Discount: bill.discount, DiscountReason: discountReason,
+        SeniorPwdId: seniorPwdId, DiscountPercent: bill.discount > 0 ? discountPct : 0,
+        Tax: bill.vat, ServiceCharge: bill.service,
+        VatableSales: bill.vatableSales, VatExemptSales: bill.vatExemptSales, LessVat: bill.lessVat,
+        GrandTotal: bill.total, AmountPaid: newTotalPaid, PaymentStatus: 'PAID',
+        OrderStatus: isConfirmed ? 'CONFIRMED_BY_COUNTER' : o.OrderStatus,
+        CounterID: session.user.userId, CounterName: session.user.fullName,
+        UpdatedAt: new Date().toISOString()
+      }).eq('OrderID', payload.orderId));
+
+      if (isConfirmed && o.TableID) {
+        await sb.from('restaurant_tables').update({ Status: 'Occupied' }).eq('TableID', o.TableID);
+      }
+
+      await logAct(session.user.userId, 'PROCESS_PAYMENT', 'Order', payload.orderId, { received, change, isSeniorPwd, method, deliveryPlatform });
+      return { success: true, changeAmount: change };
+    },
+
+    async cleanTable(token, tableId) {
+      const session = await requireSession(token);
+      const sb = checkSb();
+      unwrap(await sb.from('restaurant_tables').update({ Status: 'Available', ReservedFor: '' }).eq('TableID', tableId));
+      await logAct(session.user.userId, 'CLEAN_TABLE', 'Table', tableId, 'Table cleared and marked Available');
+      return { success: true, message: 'Table marked as Available.' };
+    },
+
+    async transferTableOrder(token, orderId, newTableId, newTableNumber) {
+      const session = await requireSession(token);
+      if (!['Waiter', 'Counter', 'Admin'].includes(session.user.role)) throw new Error('Unauthorized to transfer tables.');
+      const sb = checkSb();
+      const o = unwrap(await sb.from('orders').select('*').eq('OrderID', orderId).single());
+      if (['CANCELLED', 'VOIDED', 'COMPLETED'].includes(o.OrderStatus)) throw new Error('Cannot transfer a closed or cancelled order.');
+
+      if (newTableId) {
+        const target = unwrap(await sb.from('restaurant_tables').select('*').eq('TableID', newTableId).single());
+        if (target.Status !== 'Available') throw new Error(`Target table (${target.TableNumber}) is no longer available.`);
+        let status = 'Occupied';
+        if (o.OrderStatus === 'PENDING_COUNTER') status = 'Waiting for Counter Confirmation';
+        else if (['PREPARING', 'ACCEPTED_BY_KITCHEN'].includes(o.OrderStatus)) status = 'Preparing';
+        else if (o.OrderStatus === 'READY') status = 'Ready to Serve';
+        unwrap(await sb.from('restaurant_tables').update({ Status: status }).eq('TableID', newTableId));
+      }
+
+      if (o.TableID && o.TableID !== newTableId) {
+        await sb.from('restaurant_tables').update({ Status: 'Available' }).eq('TableID', o.TableID);
+      }
+
+      unwrap(await sb.from('orders').update({
+        TableID: newTableId || '', TableNumber: newTableNumber || 'Takeout', UpdatedAt: new Date().toISOString()
+      }).eq('OrderID', orderId));
+
+      await logAct(session.user.userId, 'TRANSFER_TABLE', 'Order', orderId, { fromTable: o.TableNumber || 'Takeout', toTable: newTableNumber || 'Takeout' });
+      return { success: true, message: `Order transferred from ${o.TableNumber || 'Takeout'} to ${newTableNumber || 'Takeout'}.` };
+    },
+
+    async mergeTableOrders(token, sourceTableId, targetTableId) {
+      const session = await requireSession(token);
+      if (!['Waiter', 'Counter', 'Admin'].includes(session.user.role)) throw new Error('Unauthorized to merge tables.');
+      const sb = checkSb();
+      const settings = await getSettingsObj();
+      const allOrders = unwrap(await sb.from('orders').select('*').not('OrderStatus', 'in', '("CANCELLED","VOIDED","COMPLETED")'));
+      const sourceOrder = (allOrders || []).find(o => o.TableID === sourceTableId);
+      const targetOrder = (allOrders || []).find(o => o.TableID === targetTableId);
+      if (!sourceOrder) throw new Error('Source table has no active order to merge.');
+      if (!targetOrder) throw new Error('Target table has no active order.');
+
+      unwrap(await sb.from('order_items').update({ OrderID: targetOrder.OrderID }).eq('OrderID', sourceOrder.OrderID));
+      const mergedItems = unwrap(await sb.from('order_items').select('*').eq('OrderID', targetOrder.OrderID));
+
+      let grossSubtotal = 0;
+      (mergedItems || []).forEach(it => { grossSubtotal += safeNum(it.UnitPriceSnapshot) * safeNum(it.Quantity, 1); });
+
+      const mergedSenior = !!String(targetOrder.SeniorPwdId || '').trim();
+      const mergedPct = mergedSenior ? 0 : safeNum(targetOrder.DiscountPercent, 0);
+      const bill = serverComputeBill(settings, grossSubtotal, mergedSenior, mergedPct);
+
+      unwrap(await sb.from('orders').update({
+        Subtotal: grossSubtotal, Discount: bill.discount, Tax: bill.vat, ServiceCharge: bill.service,
+        VatableSales: bill.vatableSales, VatExemptSales: bill.vatExemptSales, LessVat: bill.lessVat,
+        GrandTotal: bill.total, UpdatedAt: new Date().toISOString()
+      }).eq('OrderID', targetOrder.OrderID));
+
+      unwrap(await sb.from('orders').update({
+        OrderStatus: 'CANCELLED', DiscountReason: 'Merged into Order ' + targetOrder.OrderNumber, UpdatedAt: new Date().toISOString()
+      }).eq('OrderID', sourceOrder.OrderID));
+
+      unwrap(await sb.from('restaurant_tables').update({ Status: 'Available' }).eq('TableID', sourceTableId));
+      await logAct(session.user.userId, 'MERGE_TABLES', 'Order', targetOrder.OrderID, { sourceTable: sourceOrder.TableNumber, targetTable: targetOrder.TableNumber });
+      return { success: true, message: `Successfully merged ${sourceOrder.TableNumber} into ${targetOrder.TableNumber}.` };
+    },
+
+    async toggleTableReservation(token, tableId, isReserved, customerNote) {
+      const session = await requireSession(token);
+      if (!['Waiter', 'Counter', 'Admin'].includes(session.user.role)) throw new Error('Unauthorized to modify reservations.');
+      const sb = checkSb();
+      const t = unwrap(await sb.from('restaurant_tables').select('*').eq('TableID', tableId).single());
+      if (isReserved && ['Occupied', 'Preparing', 'Ready to Serve', 'Waiting for Counter Confirmation'].includes(t.Status)) {
+        throw new Error(`Cannot reserve table ${t.TableNumber} because it is currently occupied.`);
+      }
+      const newStatus = isReserved ? 'Reserved' : 'Available';
+      unwrap(await sb.from('restaurant_tables').update({ Status: newStatus, ReservedFor: isReserved ? String(customerNote || '').trim() : '' }).eq('TableID', tableId));
+      await logAct(session.user.userId, 'TOGGLE_RESERVATION', 'Table', tableId, { tableNumber: t.TableNumber, status: newStatus });
+      return { success: true, message: `Table ${t.TableNumber} marked as ${newStatus}.` };
+    },
+
+    async transferReservation(token, fromTableId, toTableId) {
+      const session = await requireSession(token);
+      const sb = checkSb();
+      const from = unwrap(await sb.from('restaurant_tables').select('*').eq('TableID', fromTableId).single());
+      const to = unwrap(await sb.from('restaurant_tables').select('*').eq('TableID', toTableId).single());
+      if (from.Status !== 'Reserved') throw new Error(`${from.TableNumber} is not reserved.`);
+      if (to.Status !== 'Available') throw new Error(`Target table (${to.TableNumber}) is no longer available.`);
+      const guest = String(from.ReservedFor || '').trim();
+      unwrap(await sb.from('restaurant_tables').update({ Status: 'Reserved', ReservedFor: guest }).eq('TableID', toTableId));
+      unwrap(await sb.from('restaurant_tables').update({ Status: 'Available', ReservedFor: '' }).eq('TableID', fromTableId));
+      await logAct(session.user.userId, 'TRANSFER_RESERVATION', 'Table', toTableId, { fromTable: from.TableNumber, toTable: to.TableNumber, guest });
+      return { success: true, message: `Reservation moved from ${from.TableNumber} to ${to.TableNumber}.` };
+    },
+
+    async getReceiptData(token, orderId) {
+      await requireSession(token);
+      const sb = checkSb();
+      const [order, items, payments, settings] = await Promise.all([
+        sb.from('orders').select('*').eq('OrderID', orderId).single().then(unwrap),
+        sb.from('order_items').select('*').eq('OrderID', orderId).then(unwrap),
+        sb.from('payments').select('*').eq('OrderID', orderId).then(unwrap),
+        getSettingsObj()
+      ]);
+      return { order, items: items || [], payments: payments || [], settings };
+    },
+
+    async saveSystemSettings(token, settingsObj) {
+      const session = await requireAdmin(token);
+      const sb = checkSb();
+      const now = new Date().toISOString();
+      const rows = Object.keys(settingsObj).map(k => ({ SettingKey: k, SettingValue: String(settingsObj[k]), UpdatedAt: now }));
+      unwrap(await sb.from('settings').upsert(rows, { onConflict: 'SettingKey' }));
+      await logAct(session.user.userId, 'UPDATE_SETTINGS', 'Settings', 'SYSTEM', settingsObj);
+      return { success: true };
+    },
+
+    async saveMenuItem(token, itemObj) {
+      const session = await requireAdmin(token);
+      const sb = checkSb();
+      const isEdit = !!itemObj.MenuItemID;
+      const id = isEdit ? itemObj.MenuItemID : uuid();
+      const payload = {
+        MenuItemID: id, CategoryID: itemObj.CategoryID, ItemName: itemObj.ItemName,
+        Price: safeNum(itemObj.Price), Station: itemObj.Station || 'Kitchen',
+        Available: itemObj.Available === true || itemObj.Available === 'true',
+        ImageURL: itemObj.ImageURL || ''
+      };
+      if (isEdit) unwrap(await sb.from('menu_items').update(payload).eq('MenuItemID', id));
+      else { payload.CreatedAt = new Date().toISOString(); unwrap(await sb.from('menu_items').insert(payload)); }
+      await logAct(session.user.userId, 'SAVE_MENU_ITEM', 'MenuItem', id, { ItemName: itemObj.ItemName, Price: itemObj.Price });
+      return { success: true };
+    },
+
+    async saveTable(token, tableObj) {
+      const session = await requireAdmin(token);
+      const sb = checkSb();
+      const isEdit = !!tableObj.TableID;
+      const id = isEdit ? tableObj.TableID : uuid();
+      if (isEdit) {
+        unwrap(await sb.from('restaurant_tables').update({ TableNumber: tableObj.TableNumber, Capacity: safeNum(tableObj.Capacity, 4) }).eq('TableID', id));
+      } else {
+        unwrap(await sb.from('restaurant_tables').insert({ TableID: id, TableNumber: tableObj.TableNumber, Capacity: safeNum(tableObj.Capacity, 4), Status: 'Available', CreatedAt: new Date().toISOString() }));
+      }
+      await logAct(session.user.userId, 'SAVE_TABLE', 'Table', id, tableObj);
+      return { success: true };
+    },
+
+    async deleteTable(token, tableId) {
+      const session = await requireAdmin(token);
+      const sb = checkSb();
+      const t = unwrap(await sb.from('restaurant_tables').select('*').eq('TableID', tableId).single());
+      const active = unwrap(await sb.from('orders').select('OrderNumber').eq('TableID', tableId).not('OrderStatus', 'in', '("CANCELLED","VOIDED","COMPLETED")'));
+      if (active && active[0]) throw new Error(`Cannot delete ${t.TableNumber} while it has an active order (${active[0].OrderNumber}).`);
+      unwrap(await sb.from('restaurant_tables').delete().eq('TableID', tableId));
+      await logAct(session.user.userId, 'DELETE_TABLE', 'Table', tableId, { tableNumber: t.TableNumber });
+      return { success: true, message: `Table ${t.TableNumber} successfully deleted.` };
+    },
+
+    async saveCategory(token, catObj) {
+      const session = await requireAdmin(token);
+      const sb = checkSb();
+      const existing = unwrap(await sb.from('categories').select('CategoryID'));
+      const id = uuid();
+      unwrap(await sb.from('categories').insert({
+        CategoryID: id, CategoryName: catObj.CategoryName, Description: catObj.Description || '',
+        SortOrder: (existing ? existing.length : 0) + 1, CreatedAt: new Date().toISOString()
+      }));
+      await logAct(session.user.userId, 'SAVE_CATEGORY', 'Category', id, catObj);
+      return { success: true };
+    },
+
+    async saveUser(token, userObj) {
+      const session = await requireAdmin(token);
+      const sb = checkSb();
+      const isEdit = !!userObj.UserID;
+      const id = isEdit ? userObj.UserID : uuid();
+      const wanted = String(userObj.Username || '').trim().toLowerCase();
+      if (!wanted) throw new Error('Username is required.');
+      const all = unwrap(await sb.from('users').select('UserID, Username'));
+      if ((all || []).some(u => String(u.Username).toLowerCase() === wanted && u.UserID !== id)) throw new Error('Username already exists.');
+
+      if (isEdit) {
+        const upd = { FullName: userObj.FullName, Username: userObj.Username, Role: userObj.Role };
+        if (userObj.NewPassword && userObj.NewPassword.length >= 6) {
+          const salt = uuid();
+          upd.Salt = salt; upd.PasswordHash = await sha256Hex(userObj.NewPassword + salt);
+        }
+        unwrap(await sb.from('users').update(upd).eq('UserID', id));
+      } else {
+        const salt = uuid();
+        unwrap(await sb.from('users').insert({
+          UserID: id, Username: userObj.Username, PasswordHash: await sha256Hex((userObj.Password || '123456') + salt),
+          Salt: salt, Role: userObj.Role, FullName: userObj.FullName, Active: true, CreatedAt: new Date().toISOString()
+        }));
+      }
+      await logAct(session.user.userId, 'SAVE_USER', 'User', id, userObj.Username);
+      return { success: true };
+    },
+
+    async getActivityLog(token, options = {}) {
+      await requireAdmin(token);
+      const sb = checkSb();
+      const limit = Math.min(1000, Math.max(1, safeNum(options.limit, 300)));
+      return unwrap(await sb.from('activity_logs').select('*').order('Timestamp', { ascending: false }).limit(limit)) || [];
+    },
+
+    async getSalesReport(token, options = {}) {
+      await requireAdmin(token);
+      const sb = checkSb();
+      const summaryOnly = options.summaryOnly === true;
+      const start = options.startDate || '';
+      const end = options.endDate || '';
+      const settings = await getSettingsObj();
+      const tz = settings.TIMEZONE || 'Asia/Manila';
+      const share = (part, whole) => whole > 0 ? round2((part / whole) * 100) : 0;
+      const pad2 = n => (n < 10 ? '0' : '') + n;
+      const toList = m => Object.keys(m).map(k => m[k]);
+      const addTo = (m, label, sale) => {
+        const k = label || '—';
+        if (!m[k]) m[k] = { name: k, orders: 0, sales: 0 };
+        m[k].orders++; m[k].sales = round2(m[k].sales + sale);
+      };
+
+      const allOrders = unwrap(await sb.from('orders').select('*')) || [];
+      const orders = [];
+      let cancelledCount = 0, openCount = 0, openValue = 0;
+
+      allOrders.forEach(o => {
+        const d = dateKeyInTz(o.CreatedAt, tz);
+        if ((start && d < start) || (end && d > end)) return;
+        o._d = d;
+        if (o.PaymentStatus === 'PAID') orders.push(o);
+        else if (['CANCELLED', 'VOIDED'].includes(o.OrderStatus)) cancelledCount++;
+        else { openCount++; openValue += safeNum(o.GrandTotal); }
+      });
+
+      let subtotal = 0, discount = 0, tax = 0, service = 0, sales = 0;
+      let discountedOrders = 0, seniorOrders = 0, seniorAmount = 0, manualAmount = 0;
+      const paidIds = {}, dailyMap = {}, hourMap = {}, waiterMap = {}, cashierMap = {};
+
+      orders.forEach(o => {
+        const sale = safeNum(o.GrandTotal), disc = safeNum(o.Discount);
+        subtotal += safeNum(o.Subtotal); discount += disc; tax += safeNum(o.Tax);
+        service += safeNum(o.ServiceCharge); sales += sale;
+        paidIds[o.OrderID] = o;
+
+        if (disc > 0) {
+          discountedOrders++;
+          if (String(o.SeniorPwdId || '').trim() || /senior|pwd/i.test(String(o.DiscountReason || ''))) { seniorOrders++; seniorAmount += disc; }
+          else manualAmount += disc;
+        }
+
+        const d = o._d;
+        if (!dailyMap[d]) dailyMap[d] = { date: d, orders: 0, items: 0, subtotal: 0, discount: 0, tax: 0, service: 0, sales: 0 };
+        const dm = dailyMap[d];
+        dm.orders++; dm.subtotal = round2(dm.subtotal + safeNum(o.Subtotal));
+        dm.discount = round2(dm.discount + disc); dm.tax = round2(dm.tax + safeNum(o.Tax));
+        dm.service = round2(dm.service + safeNum(o.ServiceCharge)); dm.sales = round2(dm.sales + sale);
+
+        if (!summaryOnly) {
+          addTo(waiterMap, o.WaiterName, sale);
+          addTo(cashierMap, o.CounterName, sale);
+          const h = hourInTz(o.CreatedAt, tz);
+          if (h >= 0) {
+            if (!hourMap[h]) hourMap[h] = { hour: h, label: pad2(h) + ':00', orders: 0, sales: 0 };
+            hourMap[h].orders++; hourMap[h].sales = round2(hourMap[h].sales + sale);
+          }
+        }
+      });
+
+      const avgOrder = orders.length ? sales / orders.length : 0;
+      if (summaryOnly) {
+        return { totalSales: round2(sales), totalTax: round2(tax), totalOrders: orders.length, averageOrderValue: round2(avgOrder) };
+      }
+
+      const [menuRows, catRows, itemRows, payRows] = await Promise.all([
+        sb.from('menu_items').select('*').then(unwrap),
+        sb.from('categories').select('*').then(unwrap),
+        sb.from('order_items').select('*').then(unwrap),
+        sb.from('payments').select('*').then(unwrap)
+      ]);
+
+      const menuById = {}, catById = {};
+      (menuRows || []).forEach(m => { menuById[m.MenuItemID] = m; });
+      (catRows || []).forEach(c => { catById[c.CategoryID] = c; });
+
+      const topItemsMap = {}, catMap = {}, stationMap = {}, qtyByOrder = {}, textByOrder = {};
+      let itemsQty = 0, itemsGross = 0;
+
+      (itemRows || []).forEach(i => {
+        const o = paidIds[i.OrderID];
+        if (!o) return;
+        const name = i.ItemNameSnapshot, qty = safeNum(i.Quantity), amt = safeNum(i.UnitPriceSnapshot) * qty;
+        itemsQty += qty; itemsGross += amt;
+
+        if (!topItemsMap[name]) topItemsMap[name] = { name, quantity: 0, sales: 0 };
+        topItemsMap[name].quantity += qty; topItemsMap[name].sales = round2(topItemsMap[name].sales + amt);
+
+        const m = menuById[i.MenuItemID];
+        const catName = (m && catById[m.CategoryID]) ? catById[m.CategoryID].CategoryName : 'Uncategorized';
+        if (!catMap[catName]) catMap[catName] = { name: catName, quantity: 0, sales: 0 };
+        catMap[catName].quantity += qty; catMap[catName].sales = round2(catMap[catName].sales + amt);
+
+        const st = i.Station || 'Kitchen';
+        if (!stationMap[st]) stationMap[st] = { name: st, quantity: 0, sales: 0 };
+        stationMap[st].quantity += qty; stationMap[st].sales = round2(stationMap[st].sales + amt);
+
+        qtyByOrder[i.OrderID] = (qtyByOrder[i.OrderID] || 0) + qty;
+        (textByOrder[i.OrderID] = textByOrder[i.OrderID] || []).push(`${qty}x ${name}`);
+        if (dailyMap[o._d]) dailyMap[o._d].items += qty;
+      });
+
+      const withShare = list => list.map(x => { x.share = share(x.sales, itemsGross); return x; }).sort((a, b) => b.sales - a.sales);
+      const topItems = toList(topItemsMap).map(x => {
+        x.avgPrice = x.quantity ? round2(x.sales / x.quantity) : 0; x.share = share(x.sales, itemsGross); return x;
+      }).sort((a, b) => b.quantity - a.quantity || b.sales - a.sales).slice(0, 100);
+
+      const payByOrder = {};
+      (payRows || []).forEach(p => { if (paidIds[p.OrderID]) payByOrder[p.OrderID] = p; });
+
+      const METHOD_LABELS = { Cash: 'Cash', Card: 'Card', GCash: 'GCash', PayMaya: 'Maya (PayMaya)', Delivery: 'Delivery' };
+      const methodMap = {}, platformMap = {}, orderRows = [];
+
+      orders.slice().sort((a, b) => new Date(b.CreatedAt) - new Date(a.CreatedAt)).forEach(o => {
+        const sale = safeNum(o.GrandTotal), p = payByOrder[o.OrderID];
+        const method = p ? String(p.PaymentMethod || 'Cash') : 'Cash';
+        const platform = p ? String(p.DeliveryPlatform || '').trim() : '';
+
+        if (!methodMap[method]) methodMap[method] = { method, label: METHOD_LABELS[method] || method, count: 0, amount: 0 };
+        methodMap[method].count++; methodMap[method].amount = round2(methodMap[method].amount + sale);
+
+        if (method === 'Delivery') {
+          const pf = platform || 'Unspecified';
+          if (!platformMap[pf]) platformMap[pf] = { name: pf, orders: 0, sales: 0 };
+          platformMap[pf].orders++; platformMap[pf].sales = round2(platformMap[pf].sales + sale);
+        }
+
+        if (orderRows.length < 1000) {
+          orderRows.push({
+            date: o._d, time: timeLabelInTz(o.CreatedAt, tz),
+            orderNumber: o.OrderNumber || '', table: o.TableNumber || 'Takeout',
+            customer: o.CustomerName || 'Walk-In Customer', waiter: o.WaiterName || '—', cashier: o.CounterName || '—',
+            method: method === 'Delivery' ? ('Delivery' + (platform ? ' - ' + platform : '')) : (METHOD_LABELS[method] || method),
+            reference: p ? String(p.ReferenceNumber || '') : '',
+            itemQty: qtyByOrder[o.OrderID] || 0, itemsText: (textByOrder[o.OrderID] || []).join(', '),
+            subtotal: round2(safeNum(o.Subtotal)), discount: round2(safeNum(o.Discount)),
+            discountReason: o.DiscountReason || '', seniorPwdId: o.SeniorPwdId || '',
+            tax: round2(safeNum(o.Tax)), service: round2(safeNum(o.ServiceCharge)), total: round2(sale)
+          });
+        }
+      });
+
+      const daily = toList(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
+      const hourly = toList(hourMap).sort((a, b) => a.hour - b.hour);
+      let bestDay = null, peakHour = null;
+      daily.forEach(d => { if (!bestDay || d.sales > bestDay.sales) bestDay = d; });
+      hourly.forEach(h => { if (!peakHour || h.sales > peakHour.sales) peakHour = h; });
+
+      return {
+        totalSales: round2(sales), totalTax: round2(tax), totalOrders: orders.length, averageOrderValue: round2(avgOrder),
+        topItems, daily, range: { start, end }, currency: settings.CURRENCY_SYMBOL || '₱', timezone: tz,
+        generatedLabel: new Date().toLocaleString(),
+        totals: { subtotal: round2(subtotal), discount: round2(discount), tax: round2(tax), service: round2(service), sales: round2(sales), items: itemsQty },
+        counts: { paid: orders.length, cancelled: cancelledCount, open: openCount, openValue: round2(openValue), discounted: discountedOrders },
+        discountSummary: { orders: discountedOrders, total: round2(discount), seniorOrders, seniorAmount: round2(seniorAmount), manualAmount: round2(manualAmount), rate: share(discount, subtotal) },
+        highlights: { bestDay, peakHour, avgItemsPerOrder: orders.length ? round2(itemsQty / orders.length) : 0, avgItemPrice: itemsQty ? round2(itemsGross / itemsQty) : 0 },
+        paymentMethods: toList(methodMap).map(m => { m.share = share(m.amount, sales); return m; }).sort((a, b) => b.amount - a.amount),
+        deliveryPlatforms: toList(platformMap).map(m => { m.share = share(m.sales, sales); return m; }).sort((a, b) => b.sales - a.sales),
+        categories: withShare(toList(catMap)), stations: withShare(toList(stationMap)), hourly,
+        waiters: toList(waiterMap).sort((a, b) => b.sales - a.sales),
+        cashiers: toList(cashierMap).sort((a, b) => b.sales - a.sales),
+        orders: orderRows, ordersTruncated: orders.length > orderRows.length
+      };
+    },
+
+    async getEndOfDayReport(token, targetDate) {
+      const session = await requireAdmin(token);
+      const sb = checkSb();
+      const settings = await getSettingsObj();
+      const tz = settings.TIMEZONE || 'Asia/Manila';
+      const dateStr = targetDate || dateKeyInTz(new Date().toISOString(), tz);
+      const inDay = v => !!v && dateKeyInTz(v, tz) === dateStr;
+
+      const [users, allOrders, allPayments, allItems, allLogs] = await Promise.all([
+        sb.from('users').select('*').then(unwrap),
+        sb.from('orders').select('*').then(unwrap),
+        sb.from('payments').select('*').then(unwrap),
+        sb.from('order_items').select('*').then(unwrap),
+        sb.from('activity_logs').select('*').eq('Action', 'LOGIN').then(unwrap)
+      ]);
+
+      const userById = {};
+      (users || []).forEach(u => { userById[u.UserID] = u; });
+      const userName = id => userById[id] ? userById[id].FullName : (id || '—');
+
+      const orderById = {};
+      (allOrders || []).forEach(o => { orderById[o.OrderID] = o; });
+      const dayOrders = (allOrders || []).filter(o => inDay(o.CreatedAt));
+
+      const dayPayments = [], hasPayment = {};
+      (allPayments || []).forEach(p => {
+        hasPayment[p.OrderID] = true;
+        const ord = orderById[p.OrderID];
+        const when = p.CreatedAt || (ord && (ord.UpdatedAt || ord.CreatedAt));
+        if (inDay(when)) dayPayments.push({ ...p, CreatedAt: when });
+      });
+
+      (allOrders || []).forEach(o => {
+        if (o.PaymentStatus !== 'PAID' || hasPayment[o.OrderID]) return;
+        const when = o.UpdatedAt || o.CreatedAt;
+        if (!inDay(when) && !inDay(o.CreatedAt)) return;
+        dayPayments.push({
+          PaymentID: 'REC-' + o.OrderID, OrderID: o.OrderID, AmountPaid: safeNum(o.AmountPaid, safeNum(o.GrandTotal)),
+          PaymentMethod: 'Cash', ReferenceNumber: '', ProcessedByID: o.CounterID || '', ChangeAmount: 0, CreatedAt: when, _recovered: true
+        });
+      });
+
+      dayPayments.sort((a, b) => new Date(a.CreatedAt) - new Date(b.CreatedAt));
+      const paidIds = {}, paidOrders = [], payTimeByOrder = {};
+      dayPayments.forEach(p => {
+        if (!paidIds[p.OrderID]) {
+          paidIds[p.OrderID] = true; payTimeByOrder[p.OrderID] = p.CreatedAt;
+          if (orderById[p.OrderID]) paidOrders.push(orderById[p.OrderID]);
+        }
+      });
+
+      let subtotal = 0, discount = 0, tax = 0, serviceCharge = 0, totalSales = 0, discountedOrders = 0;
+      let lessVat = 0, vatableSales = 0, vatExemptSales = 0;
+      paidOrders.forEach(o => {
+        lessVat += safeNum(o.LessVat); vatableSales += safeNum(o.VatableSales); vatExemptSales += safeNum(o.VatExemptSales);
+        subtotal += safeNum(o.Subtotal); discount += safeNum(o.Discount); tax += safeNum(o.Tax);
+        serviceCharge += safeNum(o.ServiceCharge); totalSales += safeNum(o.GrandTotal);
+        if (safeNum(o.Discount) > 0) discountedOrders++;
+      });
+
+      const discountDetails = [];
+      paidOrders.forEach(o => {
+        const disc = safeNum(o.Discount);
+        if (disc <= 0) return;
+        const reasonRaw = String(o.DiscountReason || '').trim();
+        let idNo = String(o.SeniorPwdId || '').trim();
+        if (!idNo) { const m = reasonRaw.match(/ID:\s*([^)]+)\)/i); if (m) idNo = m[1].trim(); }
+        discountDetails.push({
+          orderNumber: o.OrderNumber || '', tableNumber: o.TableNumber || 'Takeout', customer: o.CustomerName || 'Walk-In Customer',
+          timeLabel: timeLabelInTz(payTimeByOrder[o.OrderID], tz), isSenior: !!idNo || /senior|pwd/i.test(reasonRaw),
+          idNumber: idNo, percent: safeNum(o.DiscountPercent), amount: round2(disc), reason: reasonRaw
+        });
+      });
+
+      const METHOD_LABELS = { Cash: 'Cash', Card: 'Card', GCash: 'GCash', PayMaya: 'Maya (PayMaya)', Delivery: 'Delivery' };
+      const methodStats = {};
+      ['Cash', 'Card', 'GCash', 'PayMaya', 'Delivery'].forEach(m => { methodStats[m] = { method: m, label: METHOD_LABELS[m], count: 0, amount: 0 }; });
+
+      const cashierMap = {}, deliveryMap = {}, transactions = [], referenceTransactions = [];
+      let totalCollected = 0, totalChange = 0, totalNet = 0, missingRefCount = 0;
+
+      dayPayments.forEach((p, idx) => {
+        const method = String(p.PaymentMethod || 'Cash'), isDelivery = method === 'Delivery';
+        const platform = String(p.DeliveryPlatform || '').trim(), ord = orderById[p.OrderID] || {};
+        let paid = safeNum(p.AmountPaid);
+        if (paid <= 0) paid = safeNum(ord.AmountPaid, safeNum(ord.GrandTotal));
+        const change = safeNum(p.ChangeAmount), net = round2(paid - change), ref = String(p.ReferenceNumber || '').trim();
+        const cashier = userName(p.ProcessedByID);
+
+        if (!methodStats[method]) methodStats[method] = { method, label: METHOD_LABELS[method] || method, count: 0, amount: 0 };
+        methodStats[method].count++; methodStats[method].amount = round2(methodStats[method].amount + paid);
+        totalCollected = round2(totalCollected + paid); totalChange = round2(totalChange + change); totalNet = round2(totalNet + net);
+
+        if (isDelivery) {
+          const pf = platform || 'Unspecified';
+          if (!deliveryMap[pf]) deliveryMap[pf] = { platform: pf, count: 0, amount: 0 };
+          deliveryMap[pf].count++; deliveryMap[pf].amount = round2(deliveryMap[pf].amount + paid);
+        }
+        if (!cashierMap[cashier]) cashierMap[cashier] = { name: cashier, count: 0, amount: 0 };
+        cashierMap[cashier].count++; cashierMap[cashier].amount = round2(cashierMap[cashier].amount + paid);
+        if (method !== 'Cash' && !isDelivery && !ref) missingRefCount++;
+
+        const tx = {
+          no: idx + 1, time: p.CreatedAt, timeLabel: timeLabelInTz(p.CreatedAt, tz),
+          orderNumber: ord.OrderNumber || '', tableNumber: ord.TableNumber || 'Takeout',
+          customer: ord.CustomerName || 'Walk-In Customer', cashier, method,
+          methodLabel: isDelivery ? ('Delivery' + (platform ? ' - ' + platform : '')) : (METHOD_LABELS[method] || method),
+          platform, reference: ref, paid, received: paid, change, due: net, amount: paid, recovered: !!p._recovered
+        };
+        transactions.push(tx);
+        if (method !== 'Cash' && !isDelivery) referenceTransactions.push(tx);
+      });
+
+      const itemMap = {};
+      (allItems || []).forEach(i => {
+        if (!paidIds[i.OrderID]) return;
+        const key = `${i.ItemNameSnapshot}|${i.UnitPriceSnapshot}`;
+        if (!itemMap[key]) itemMap[key] = { name: i.ItemNameSnapshot, unitPrice: safeNum(i.UnitPriceSnapshot), quantity: 0, total: 0 };
+        itemMap[key].quantity += safeNum(i.Quantity);
+        itemMap[key].total = round2(itemMap[key].total + safeNum(i.UnitPriceSnapshot) * safeNum(i.Quantity));
+      });
+      const itemsSold = Object.values(itemMap).sort((a, b) => b.quantity - a.quantity);
+      let itemsTotalQty = 0, itemsTotalAmount = 0;
+      itemsSold.forEach(i => { itemsTotalQty += i.quantity; itemsTotalAmount = round2(itemsTotalAmount + i.total); });
+
+      const loginMap = {};
+      (allLogs || []).forEach(l => {
+        if (!inDay(l.Timestamp)) return;
+        const uid = l.UserID;
+        if (!loginMap[uid]) {
+          const u = userById[uid] || {};
+          loginMap[uid] = { userId: uid, name: u.FullName || uid, role: u.Role || '', logins: 0, firstTs: l.Timestamp, lastTs: l.Timestamp };
+        }
+        loginMap[uid].logins++;
+        if (new Date(l.Timestamp) < new Date(loginMap[uid].firstTs)) loginMap[uid].firstTs = l.Timestamp;
+        if (new Date(l.Timestamp) > new Date(loginMap[uid].lastTs)) loginMap[uid].lastTs = l.Timestamp;
+      });
+      const loggedInUsers = Object.values(loginMap).map(e => ({ ...e, firstLogin: timeLabelInTz(e.firstTs, tz), lastLogin: timeLabelInTz(e.lastTs, tz) }));
+
+      const openOrders = dayOrders.filter(o => o.PaymentStatus !== 'PAID' && !['CANCELLED', 'VOIDED'].includes(o.OrderStatus));
+      let openValue = 0; openOrders.forEach(o => { openValue += safeNum(o.GrandTotal); });
+
+      return {
+        reportNo: 'EOD-' + dateStr.replace(/-/g, ''), restaurantName: settings.RESTAURANT_NAME || 'Restaurant POS',
+        date: dateStr, generatedAt: new Date().toISOString(), generatedLabel: new Date().toLocaleString(),
+        generatedBy: session.user.fullName, currency: settings.CURRENCY_SYMBOL || '₱',
+        totals: { subtotal: round2(subtotal), discount: round2(discount), tax: round2(tax), serviceCharge: round2(serviceCharge), lessVat: round2(lessVat), vatableSales: round2(vatableSales), vatExemptSales: round2(vatExemptSales), sales: round2(totalSales), averageOrder: paidOrders.length ? round2(totalSales / paidOrders.length) : 0 },
+        orderCounts: { paid: paidOrders.length, cancelled: dayOrders.filter(o => ['CANCELLED', 'VOIDED'].includes(o.OrderStatus)).length, open: openOrders.length, openValue: round2(openValue), discounted: discountedOrders },
+        paymentSummary: Object.values(methodStats), deliverySummary: Object.values(deliveryMap), cashierSummary: Object.values(cashierMap),
+        totalCollected, totalChange, totalNet, transactions, referenceTransactions, missingRefCount,
+        discountDetails, discountTotal: round2(discount), itemsSold, itemsTotalQty, itemsTotalAmount, loggedInUsers,
+        diagnostics: { ordersScanned: (allOrders || []).length, paymentsScanned: (allPayments || []).length, recoveredCount: 0, availableDates: [], timezone: tz }
+      };
+    },
+
+    async archiveAndResetPOS(token, dateStr) {
+      const session = await requireAdmin(token);
+      const sb = checkSb();
+      const [orders, orderItems, payments] = await Promise.all([
+        sb.from('orders').select('*').then(unwrap),
+        sb.from('order_items').select('*').then(unwrap),
+        sb.from('payments').select('*').then(unwrap)
+      ]);
+
+      // Trigger local JSON backup download before clearing Supabase tables
+      const backupPayload = JSON.stringify({ exportedAt: new Date().toISOString(), date: dateStr, orders, orderItems, payments }, null, 2);
+      const blob = new Blob([backupPayload], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `POS_Backup_${dateStr}_${Date.now()}.json`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+
+      await sb.from('payments').delete().neq('PaymentID', '');
+      await sb.from('order_items').delete().neq('OrderItemID', '');
+      await sb.from('orders').delete().neq('OrderID', '');
+      await sb.from('restaurant_tables').update({ Status: 'Available', ReservedFor: '' }).neq('TableID', '');
+
+      await logAct(session.user.userId, 'ARCHIVE_RESET_POS', 'POS', dateStr, 'Daily orders reset and backup downloaded');
+      return { success: true, message: `POS closed and reset for ${dateStr}. Backup file downloaded.` };
+    },
+
+    async restorePOSFromBackup(token, backupObj) {
+      const session = await requireAdmin(token);
+      const sb = checkSb();
+      if (!backupObj || !Array.isArray(backupObj.orders)) throw new Error('Invalid backup JSON file.');
+
+      await sb.from('payments').delete().neq('PaymentID', '');
+      await sb.from('order_items').delete().neq('OrderItemID', '');
+      await sb.from('orders').delete().neq('OrderID', '');
+
+      if (backupObj.orders.length) unwrap(await sb.from('orders').insert(backupObj.orders));
+      if (backupObj.orderItems && backupObj.orderItems.length) unwrap(await sb.from('order_items').insert(backupObj.orderItems));
+      if (backupObj.payments && backupObj.payments.length) unwrap(await sb.from('payments').insert(backupObj.payments));
+
+      await logAct(session.user.userId, 'RESTORE_POS_BACKUP', 'POS', backupObj.date || '', 'Restored from backup JSON');
+      return { success: true, message: 'POS transactional data successfully restored!' };
+    },
+
+    async pruneOldPOSBackups(token) {
+      await requireAdmin(token);
+      const sb = checkSb();
+      const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
+      await sb.from('sessions').delete().lt('ExpiresAt', new Date().toISOString());
+      const res = await sb.from('activity_logs').delete({ count: 'exact' }).lt('Timestamp', cutoff);
+      return { success: true, deletedCount: res.count || 0 };
+    },
+
+    async exportDatabaseAsZip(token) {
+      const session = await requireAdmin(token);
+      const sb = checkSb();
+      const zip = new JSZip();
+      const tableNames = ['users', 'settings', 'categories', 'menu_items', 'restaurant_tables', 'orders', 'order_items', 'payments', 'activity_logs'];
+
+      for (const tbl of tableNames) {
+        const rows = unwrap(await sb.from(tbl).select('*')) || [];
+        if (!rows.length) continue;
+        const headers = Object.keys(rows[0]).filter(h => h !== 'PasswordHash' && h !== 'Salt');
+        const csv = [headers.join(',')].concat(rows.map(r =>
+          headers.map(h => {
+            const s = String(r[h] === null || r[h] === undefined ? '' : r[h]);
+            return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+          }).join(',')
+        )).join('\r\n');
+        zip.file(`${tbl}.csv`, csv);
+      }
+
+      const base64Data = await zip.generateAsync({ type: 'base64' });
+      const fileName = `POS_CSV_Export_${todayStr()}.zip`;
+      await logAct(session.user.userId, 'EXPORT_DATABASE_ZIP', 'POS', '', { fileName });
+      return { success: true, fileName, base64Data };
+    },
+
+    async setupDatabase(token) {
+      await requireAdmin(token);
+      return { success: true, message: 'Database verified on Supabase.' };
+    }
+  };
+})();
 
 /* ============================================================
    LOCAL STORAGE & INDEXEDDB ENGINE
@@ -1346,7 +2299,7 @@ function debounce(fn, ms) {
 }
 
 function uuid() {
-  try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+  try { if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID(); } catch (e) {}
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16);
   });
@@ -1398,19 +2351,21 @@ function callServerT(timeoutMs, fnName, ...args) {
       if (done) return; done = true;
       const e = new Error('Request timed out'); e.isNetwork = true; reject(e);
     }, timeoutMs);
-    try {
-      google.script.run
-        .withSuccessHandler(r => { if (done) return; done = true; clearTimeout(timer); resolve(r); })
-        .withFailureHandler(err => {
-          if (done) return; done = true; clearTimeout(timer);
-          const raw = (err && err.message) ? err.message : String(err || 'Unknown error');
-          const e = new Error(raw.replace(/^(Error|Exception):\s*/i, ''));
-          e.isNetwork = !navigator.onLine || NET_RE.test(raw); reject(e);
-        })[fnName](...args);
-    } catch (ex) {
-      if (done) return; done = true; clearTimeout(timer);
-      const e = new Error(ex.message || 'Cannot reach server'); e.isNetwork = true; reject(e);
+
+    if (!SupabaseAPI[fnName]) {
+      clearTimeout(timer);
+      return reject(new Error('Unknown API function: ' + fnName));
     }
+
+    SupabaseAPI[fnName](...args)
+      .then(r => { if (done) return; done = true; clearTimeout(timer); resolve(r); })
+      .catch(err => {
+        if (done) return; done = true; clearTimeout(timer);
+        const raw = (err && err.message) ? err.message : String(err || 'Unknown error');
+        const e = new Error(raw.replace(/^(Error|Exception):\s*/i, ''));
+        e.isNetwork = !navigator.onLine || NET_RE.test(raw);
+        reject(e);
+      });
   });
 }
 
@@ -1478,15 +2433,9 @@ function applyOptimistic(item) {
       const received = Number(p.amountReceived || 0);
       const computed = p.computedTotals || {};
       if (computed.total !== undefined) {
-        o.Subtotal = computed.subtotal;
-        o.Discount = computed.discount;
-        o.DiscountReason = p.discountReason || '';
-        o.Tax = computed.tax;
-        o.ServiceCharge = computed.srv;
-        o.LessVat = computed.lessVat;
-        o.VatableSales = computed.vatableSales;
-        o.VatExemptSales = computed.vatExemptSales;
-        o.GrandTotal = computed.total;
+        o.Subtotal = computed.subtotal; o.Discount = computed.discount; o.DiscountReason = p.discountReason || '';
+        o.Tax = computed.tax; o.ServiceCharge = computed.srv; o.LessVat = computed.lessVat;
+        o.VatableSales = computed.vatableSales; o.VatExemptSales = computed.vatExemptSales; o.GrandTotal = computed.total;
       }
       if (p.customerName) o.CustomerName = p.customerName;
       const due = Math.max(0, Number(o.GrandTotal || 0) - Number(o.AmountPaid || 0));
@@ -1498,8 +2447,7 @@ function applyOptimistic(item) {
         o.OrderStatus = 'CONFIRMED_BY_COUNTER';
         if (o.TableID) setTableStatus(o.TableID, 'Occupied');
       }
-      o.PaymentStatus = 'PAID';
-      o.AmountPaid = Number(o.GrandTotal || 0);
+      o.PaymentStatus = 'PAID'; o.AmountPaid = Number(o.GrandTotal || 0);
       o.CounterName = state.user ? state.user.fullName : '';
     } else if (item.fn === 'cleanTable') {
       setTableStatus(a[0], 'Available');
@@ -1675,7 +2623,6 @@ function applyRoleNav() {
   if (allowed.length && !allowed.includes(state.currentView)) switchView(allowed[0]);
 }
 
-// Without the KDS, paid orders go straight to serving
 function canServeOrder(o) {
   if (o.OrderStatus === 'READY') return true;
   return isKdsDisabled() && ['CONFIRMED_BY_COUNTER', 'ACCEPTED_BY_KITCHEN', 'PREPARING'].includes(o.OrderStatus);
@@ -1734,7 +2681,6 @@ function switchView(view) {
   });
 
   if (view === 'admin') {
-    // Admin data is refreshed at most every 30 seconds
     if (navigator.onLine && Date.now() - (state.adminLoadedAt || 0) > 30000) {
       state.adminLoadedAt = Date.now();
       loadAdminStats(); loadActivityLogs();
@@ -1755,7 +2701,7 @@ function renderCurrentView() {
 async function loadBootstrap() {
   try {
     const data = await callServer('getBootstrapData', state.token, state.bootVer || null);
-    if (data && data.unchanged) return; // nothing new - skip the big download
+    if (data && data.unchanged) return;
     applyBootstrap(data); state.bootVer = data.version; Store.set('bootstrap', data); renderCurrentView();
   } catch (err) {
     if (err.isNetwork) return;
@@ -1887,18 +2833,11 @@ function renderTables() {
 
   setHtml(el, tableList.map(t => {
     let border = 'success', badge = 'success', bgStyle = '';
-    
-    if (t.Status === 'Occupied' || t.Status === 'Waiting for Counter Confirmation') { 
-      border = 'danger'; badge = 'danger'; 
-    } else if (t.Status === 'Preparing') { 
-      border = 'info'; badge = 'info'; 
-    } else if (t.Status === 'Served' || t.Status === 'Ready to Serve') { 
-      border = 'primary'; badge = 'primary'; 
-    } else if (t.Status === 'Needs Cleaning') { 
-      border = 'warning'; badge = 'warning text-dark'; 
-    } else if (t.Status === 'Reserved') { 
-      border = 'purple'; badge = 'purple'; bgStyle = 'border-top-color: #6f42c1;';
-    }
+    if (t.Status === 'Occupied' || t.Status === 'Waiting for Counter Confirmation') { border = 'danger'; badge = 'danger'; }
+    else if (t.Status === 'Preparing') { border = 'info'; badge = 'info'; }
+    else if (t.Status === 'Served' || t.Status === 'Ready to Serve') { border = 'primary'; badge = 'primary'; }
+    else if (t.Status === 'Needs Cleaning') { border = 'warning'; badge = 'warning text-dark'; }
+    else if (t.Status === 'Reserved') { border = 'purple'; badge = 'purple'; bgStyle = 'border-top-color: #6f42c1;'; }
 
     const needsClean = ['Needs Cleaning', 'Served', 'Ready to Serve', 'Occupied', 'Preparing', 'Waiting for Counter Confirmation'].includes(t.Status);
     const isReserved = t.Status === 'Reserved';
@@ -1907,18 +2846,14 @@ function renderTables() {
       <div class="card card-pos table-card p-3 text-center position-relative"
            style="${bgStyle || `border-top-color: var(--bs-${border});`}"
            onclick="${needsClean ? `cleanTable('${escapeHtml(t.TableID)}')` : `openReservationModal('${escapeHtml(t.TableID)}')`}">
-        
         ${isReserved ? '<i class="fa-solid fa-bookmark position-absolute top-0 end-0 m-2" style="color: #6f42c1;"></i>' : ''}
-        
         <h5 class="fw-bold mb-1">${escapeHtml(t.TableNumber)}</h5>
         <small class="text-muted">${escapeHtml(t.Capacity)} seats</small>
-        
         <div class="mt-2">
           <span class="badge ${isReserved ? 'text-white' : `bg-${badge}`}" style="${isReserved ? 'background-color: #6f42c1;' : ''}">
             ${escapeHtml(t.Status)}
           </span>
         </div>
-
         ${isReserved && t.ReservedFor ? `<div class="mt-2 small fw-bold text-truncate" style="color: #6f42c1;" title="${escapeHtml(t.ReservedFor)}"><i class="fa-solid fa-user me-1"></i>${escapeHtml(t.ReservedFor)}</div>` : ''}
         ${t.Status === 'Available' ? '<div class="mt-2 small text-muted"><i class="fa-solid fa-bookmark me-1"></i>Tap to Reserve</div>' : ''}
         ${isReserved ? '<div class="mt-2 small fw-bold" style="color: #6f42c1;"><i class="fa-solid fa-pen me-1"></i>Manage Reservation</div>' : ''}
@@ -1952,7 +2887,6 @@ function openReservationModal(tableId) {
   $('resCustomerNote').value = isReserved ? (t.ReservedFor || '') : '';
   $('btnUnreserve').style.display = isReserved ? 'inline-block' : 'none';
 
-  // Reserved tables can be moved to another available table
   const box = $('resTransferBox'), sel = $('resTransferSelect');
   if (box && sel) {
     const free = (state.tables || []).filter(x => x.Status === 'Available' && x.TableID !== tableId);
@@ -1961,18 +2895,15 @@ function openReservationModal(tableId) {
       : '<option value="">-- No tables currently available --</option>';
     box.classList.toggle('d-none', !isReserved);
   }
-
   showModal('reservationModal');
 }
 
 async function submitReservation(isReserved) {
   const tableId = $('resTableId').value;
   const note = $('resCustomerNote').value;
-
   try {
     showLoading('Updating reservation status…');
     const r = await runAction('toggleTableReservation', [tableId, isReserved, note], null, 'Table Reservation');
-
     showDone(r.queued ? 'Saved offline — will sync' : (r.res.message || 'Status updated'), () => {
       hideModal('reservationModal');
       if (!r.queued) poll(true);
@@ -1984,7 +2915,6 @@ async function submitReservationTransfer() {
   const fromId = $('resTableId').value;
   const toId = $('resTransferSelect').value;
   if (!toId) return toast('Please select an available table.', 'warning');
-
   try {
     showLoading('Transferring reservation…');
     const r = await runAction('transferReservation', [fromId, toId], null, 'Reservation Transfer');
@@ -2062,7 +2992,6 @@ function waiterOrderCard(o) {
 function renderWaiterOrders() {
   const body = $('waiterOrdersBody');
   if (!body) return;
-
   const orderList = Array.isArray(state.orders) ? state.orders : [];
   const isGrid = state.dashView === 'grid';
   const wrap = $('waiterOrdersListWrap'), grid = $('waiterOrdersGrid');
@@ -2070,9 +2999,7 @@ function renderWaiterOrders() {
   if (grid) grid.classList.toggle('d-none', !isGrid);
 
   if (isGrid) {
-    setHtml(grid, orderList.length
-      ? orderList.map(waiterOrderCard).join('')
-      : '<div class="col-12 text-center text-muted py-4">No active orders.</div>');
+    setHtml(grid, orderList.length ? orderList.map(waiterOrderCard).join('') : '<div class="col-12 text-center text-muted py-4">No active orders.</div>');
     updateEtas();
     return;
   }
@@ -2091,7 +3018,6 @@ function renderWaiterOrders() {
       <td><div class="d-flex gap-1">${waiterOrderButtons(o)}</div></td>
     </tr>`;
   }).join(''));
-
   updateEtas();
 }
 
@@ -2134,32 +3060,20 @@ function openTransferModal(orderId) {
 
   const select = $('transferTargetTableSelect');
   const availableTables = (state.tables || []).filter(t => t.Status === 'Available');
-
-  if (availableTables.length === 0) {
-    select.innerHTML = '<option value="">-- No tables currently available --</option>';
-  } else {
-    select.innerHTML = availableTables.map(t => 
-      `<option value="${escapeHtml(t.TableID)}|${escapeHtml(t.TableNumber)}">${escapeHtml(t.TableNumber)} (${escapeHtml(t.Capacity)} seats)</option>`
-    ).join('');
-  }
-
+  select.innerHTML = availableTables.length === 0
+    ? '<option value="">-- No tables currently available --</option>'
+    : availableTables.map(t => `<option value="${escapeHtml(t.TableID)}|${escapeHtml(t.TableNumber)}">${escapeHtml(t.TableNumber)} (${escapeHtml(t.Capacity)} seats)</option>`).join('');
   showModal('transferTableModal');
 }
 
 async function submitTableTransfer() {
   const orderId = $('transferOrderId').value;
   const selVal = $('transferTargetTableSelect').value;
-
   if (!selVal) return toast('Please select an available target table.', 'warning');
-
   const parts = selVal.split('|');
-  const newTableId = parts[0];
-  const newTableNumber = parts.slice(1).join('|');
-
   try {
     showLoading('Transferring table…');
-    const r = await runAction('transferTableOrder', [orderId, newTableId, newTableNumber], null, 'Table Transfer');
-
+    const r = await runAction('transferTableOrder', [orderId, parts[0], parts.slice(1).join('|')], null, 'Table Transfer');
     showDone(r.queued ? 'Saved offline — will sync' : (r.res.message || 'Table transferred!'), () => {
       hideModal('transferTableModal');
       if (!r.queued) poll(true);
@@ -2168,32 +3082,20 @@ async function submitTableTransfer() {
 }
 
 function openMergeModal() {
-  const occupiedOrders = (state.orders || []).filter(o => 
-    o.TableID && ['CANCELLED', 'VOIDED', 'COMPLETED'].indexOf(o.OrderStatus) === -1
-  );
+  const occupiedOrders = (state.orders || []).filter(o => o.TableID && !['CANCELLED', 'VOIDED', 'COMPLETED'].includes(o.OrderStatus));
+  if (occupiedOrders.length < 2) return toast('You need at least 2 active occupied tables to perform a merge.', 'warning');
 
-  if (occupiedOrders.length < 2) {
-    return toast('You need at least 2 active occupied tables to perform a merge.', 'warning');
-  }
-
-  const sourceSelect = $('mergeSourceTableSelect');
-  sourceSelect.innerHTML = occupiedOrders.map(o => 
+  $('mergeSourceTableSelect').innerHTML = occupiedOrders.map(o =>
     `<option value="${escapeHtml(o.TableID)}">${escapeHtml(o.TableNumber)} (${escapeHtml(o.OrderNumber)} - ${escapeHtml(o.CustomerName)})</option>`
   ).join('');
-
   onMergeSourceTableChange();
   showModal('mergeTablesModal');
 }
 
 function onMergeSourceTableChange() {
   const selectedSourceId = $('mergeSourceTableSelect').value;
-  const targetSelect = $('mergeTargetTableSelect');
-
-  const availableTargets = (state.orders || []).filter(o => 
-    o.TableID && o.TableID !== selectedSourceId && ['CANCELLED', 'VOIDED', 'COMPLETED'].indexOf(o.OrderStatus) === -1
-  );
-
-  targetSelect.innerHTML = availableTargets.map(o => 
+  const availableTargets = (state.orders || []).filter(o => o.TableID && o.TableID !== selectedSourceId && !['CANCELLED', 'VOIDED', 'COMPLETED'].includes(o.OrderStatus));
+  $('mergeTargetTableSelect').innerHTML = availableTargets.map(o =>
     `<option value="${escapeHtml(o.TableID)}">${escapeHtml(o.TableNumber)} (${escapeHtml(o.OrderNumber)} - ${escapeHtml(o.CustomerName)})</option>`
   ).join('');
 }
@@ -2201,15 +3103,10 @@ function onMergeSourceTableChange() {
 async function submitTableMerge() {
   const sourceTableId = $('mergeSourceTableSelect').value;
   const targetTableId = $('mergeTargetTableSelect').value;
-
-  if (!sourceTableId || !targetTableId || sourceTableId === targetTableId) {
-    return toast('Please select two distinct active tables.', 'warning');
-  }
-
+  if (!sourceTableId || !targetTableId || sourceTableId === targetTableId) return toast('Please select two distinct active tables.', 'warning');
   try {
     showLoading('Merging table orders…');
     const r = await runAction('mergeTableOrders', [sourceTableId, targetTableId], null, 'Table Merge');
-
     showDone(r.queued ? 'Saved offline — will sync' : (r.res.message || 'Tables merged!'), () => {
       hideModal('mergeTablesModal');
       if (!r.queued) poll(true);
@@ -2218,7 +3115,7 @@ async function submitTableMerge() {
 }
 
 /* ============================================================
-   RENDER: COUNTER  (Grid cards / List view)
+   RENDER: COUNTER
    ============================================================ */
 function setCounterView(mode) {
   state.counterView = mode === 'list' ? 'list' : 'grid';
@@ -2233,7 +3130,6 @@ function syncCounterViewButtons() {
   if (l) l.classList.toggle('active', state.counterView === 'list');
 }
 
-/* ---- Grid cards ---- */
 function counterPendingCard(o) {
   return `
     <div class="col-12 col-md-4">
@@ -2316,26 +3212,22 @@ function counterUnpaidCard(o) {
     </div>`;
 }
 
-/* ---- List rows ---- */
 function counterListRow(o, kind) {
   const itemsTxt = (o.items || []).map(i => `${i.Quantity}× ${escapeHtml(i.ItemNameSnapshot)}`).join(', ');
   const ticketBtn = `<button class="btn btn-sm btn-outline-dark" onclick="printKitchenTicket('${o.OrderID}')" title="Kitchen ticket"><i class="fa-solid fa-print"></i></button>`;
   let total, status, actions, border;
 
   if (kind === 'pending') {
-    border = 'warning';
-    total = `<strong class="text-danger">${curr()}${Number(o.Subtotal || 0).toFixed(2)}</strong>`;
+    border = 'warning'; total = `<strong class="text-danger">${curr()}${Number(o.Subtotal || 0).toFixed(2)}</strong>`;
     status = badgeForStatus(o.OrderStatus);
     actions = `<button class="btn btn-sm btn-success fw-bold" onclick="confirmCounter('${o.OrderID}')">Pay &amp; Confirm</button>
                <button class="btn btn-sm btn-outline-danger" onclick="rejectCounter('${o.OrderID}')">Reject</button>${ticketBtn}`;
   } else if (kind === 'paid') {
-    border = 'info';
-    total = `<strong class="text-success">${curr()}${Number(o.GrandTotal || 0).toFixed(2)}</strong>`;
+    border = 'info'; total = `<strong class="text-success">${curr()}${Number(o.GrandTotal || 0).toFixed(2)}</strong>`;
     status = `${badgeForStatus(o.OrderStatus)} <span class="badge bg-success"><i class="fa-solid fa-check me-1"></i>PAID</span>`;
     actions = `<button class="btn btn-sm btn-outline-secondary" onclick="openReceiptModal('${o.OrderID}')"><i class="fa-solid fa-receipt me-1"></i>Receipt</button>${ticketBtn}`;
   } else {
-    border = 'danger';
-    total = `<strong class="text-danger">${curr()}${Number(o.GrandTotal || 0).toFixed(2)}</strong>`;
+    border = 'danger'; total = `<strong class="text-danger">${curr()}${Number(o.GrandTotal || 0).toFixed(2)}</strong>`;
     status = `${badgeForStatus(o.OrderStatus)} <span class="badge bg-danger">UNPAID</span>`;
     actions = `<button class="btn btn-sm btn-primary fw-bold" onclick="openPaymentModal('${o.OrderID}', ${Number(o.GrandTotal || 0)}, ${Number(o.AmountPaid || 0)})"><i class="fa-solid fa-money-bill me-1"></i>Pay</button>${ticketBtn}`;
   }
@@ -2354,10 +3246,7 @@ function counterListRow(o, kind) {
 }
 
 function counterListHtml(pending, paid, unpaid) {
-  const rows = []
-    .concat(pending.map(o => counterListRow(o, 'pending')))
-    .concat(paid.map(o => counterListRow(o, 'paid')))
-    .concat(unpaid.map(o => counterListRow(o, 'unpaid')));
+  const rows = [].concat(pending.map(o => counterListRow(o, 'pending'))).concat(paid.map(o => counterListRow(o, 'paid'))).concat(unpaid.map(o => counterListRow(o, 'unpaid')));
   return `<div class="col-12"><div class="card card-pos p-2"><div class="table-responsive">
     <table class="table table-hover align-middle mb-0">
       <thead><tr><th>Order #</th><th>Table</th><th>Customer</th><th>Server</th><th>Items</th><th>Total</th><th>Status</th><th>Counter</th><th class="text-end">Actions</th></tr></thead>
@@ -2368,17 +3257,11 @@ function counterListHtml(pending, paid, unpaid) {
 function renderCounterQueue() {
   const el = $('counterQueue');
   if (!el) return;
-
   const orderList = Array.isArray(state.orders) ? state.orders : [];
   const kdsOff = isKdsDisabled();
   const pending = orderList.filter(o => o.OrderStatus === 'PENDING_COUNTER');
-  const inKitchenOrReady = orderList.filter(o =>
-    ['CONFIRMED_BY_COUNTER', 'ACCEPTED_BY_KITCHEN', 'PREPARING', 'READY'].includes(o.OrderStatus) &&
-    o.PaymentStatus === 'PAID'
-  );
-  const readyToPay = orderList.filter(o =>
-    ['READY', 'SERVED'].includes(o.OrderStatus) && o.PaymentStatus !== 'PAID'
-  );
+  const inKitchenOrReady = orderList.filter(o => ['CONFIRMED_BY_COUNTER', 'ACCEPTED_BY_KITCHEN', 'PREPARING', 'READY'].includes(o.OrderStatus) && o.PaymentStatus === 'PAID');
+  const readyToPay = orderList.filter(o => ['READY', 'SERVED'].includes(o.OrderStatus) && o.PaymentStatus !== 'PAID');
 
   let html = '';
   if (pending.length === 0 && inKitchenOrReady.length === 0 && readyToPay.length === 0) {
@@ -2386,11 +3269,8 @@ function renderCounterQueue() {
   } else if (state.counterView === 'list') {
     html = counterListHtml(pending, inKitchenOrReady, readyToPay);
   } else {
-    html = pending.map(counterPendingCard).join('') +
-           inKitchenOrReady.map(o => counterPaidCard(o, kdsOff)).join('') +
-           readyToPay.map(counterUnpaidCard).join('');
+    html = pending.map(counterPendingCard).join('') + inKitchenOrReady.map(o => counterPaidCard(o, kdsOff)).join('') + readyToPay.map(counterUnpaidCard).join('');
   }
-
   setHtml(el, html);
 
   const statsEl = $('counterStats');
@@ -2439,7 +3319,6 @@ function buildKitchenTicketHtml(o) {
   `;
 }
 
-// Shows the ticket first; printing happens from the preview's Print button
 function printKitchenTicket(orderId) {
   const o = (state.orders || []).find(x => x.OrderID === orderId);
   if (!o) return toast('Order not found.', 'warning');
@@ -2453,18 +3332,9 @@ function printKitchenTicket(orderId) {
    PRINT MODE (Thermal 80mm / Standard A4-Letter)
    ============================================================ */
 function getPrintMode() { return lsGet('pos_print_mode') === 'standard' ? 'standard' : 'thermal'; }
+function setPrintMode(mode) { lsSet('pos_print_mode', mode === 'standard' ? 'standard' : 'thermal'); syncPrintModeSelects(); }
+function syncPrintModeSelects() { const m = getPrintMode(); document.querySelectorAll('.print-mode-select').forEach(s => { s.value = m; }); }
 
-function setPrintMode(mode) {
-  lsSet('pos_print_mode', mode === 'standard' ? 'standard' : 'thermal');
-  syncPrintModeSelects();
-}
-
-function syncPrintModeSelects() {
-  const m = getPrintMode();
-  document.querySelectorAll('.print-mode-select').forEach(s => { s.value = m; });
-}
-
-// Opens a print window formatted for the selected printer type. Returns false if pop-ups are blocked.
 function printHtmlDocument(title, bodyHtml, kind) {
   const standard = getPrintMode() === 'standard';
   const win = window.open('', '_blank', standard ? 'width=820,height=900' : (kind === 'ticket' ? 'width=320,height=500' : 'width=400,height=600'));
@@ -2496,20 +3366,15 @@ function printKitchenTicketNow() {
 function renderKitchenDisplay() {
   const el = $('kdsGrid');
   if (!el) return;
-
   const orderList = Array.isArray(state.orders) ? state.orders : [];
   const orders = orderList.filter(o => KDS_STATUSES.includes(o.OrderStatus));
-
   $('kdsPendingCount').textContent = `${orders.length} Active`;
 
   const ae = document.activeElement;
   if (ae && ae.tagName === 'INPUT' && el.contains(ae)) return;
 
   setHtml(el, orders.map(o => {
-    const prepVal = state.prepInputs[o.OrderID] !== undefined
-      ? state.prepInputs[o.OrderID]
-      : (o.EstimatedPreparationMinutes || 15);
-
+    const prepVal = state.prepInputs[o.OrderID] !== undefined ? state.prepInputs[o.OrderID] : (o.EstimatedPreparationMinutes || 15);
     const orderDateObj = o.CreatedAt ? new Date(o.CreatedAt) : new Date();
     const timeFormatted = orderDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const dateFormatted = orderDateObj.toLocaleDateString();
@@ -2531,16 +3396,13 @@ function renderKitchenDisplay() {
           <h5 class="mb-0 text-primary">${escapeHtml(o.OrderNumber)}</h5>
           <span class="badge bg-dark">${escapeHtml(o.TableNumber || 'Takeout')}</span>
         </div>
-
         <div class="d-flex justify-content-between align-items-center text-muted small border-bottom pb-1 mb-2">
           <span><i class="fa-regular fa-clock me-1 text-warning"></i>${timeFormatted}</span>
           <span><i class="fa-regular fa-calendar me-1"></i>${dateFormatted}</span>
         </div>
-
         <div class="small text-muted mb-2">
           <i class="fa-solid fa-user-tie me-1"></i>Server: <strong>${escapeHtml(o.WaiterName || o.CounterName || '—')}</strong>
         </div>
-
         <ul class="list-group mb-2">
            ${(o.items || []).map(i => `<li class="list-group-item d-flex justify-content-between fw-bold"><span>${i.Quantity}× ${escapeHtml(i.ItemNameSnapshot)}</span><span class="badge bg-light text-dark">${escapeHtml(i.Station || '')}</span></li>`).join('')}
         </ul>
@@ -2549,12 +3411,11 @@ function renderKitchenDisplay() {
       </div>
     </div>`;
   }).join(''));
-
   updateEtas();
 }
 
 /* ============================================================
-   ACTIONS: WAITER
+   ACTIONS: WAITER, COUNTER, KITCHEN
    ============================================================ */
 async function transition(orderId, action, params, label, loadingMsg, doneMsg) {
   try {
@@ -2565,19 +3426,12 @@ async function transition(orderId, action, params, label, loadingMsg, doneMsg) {
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
-function serveOrder(orderId) {
-  return transition(orderId, 'SERVE', {}, 'Serve order', 'Marking served…', 'Order served!');
-}
-
-/* ============================================================
-   ACTIONS: COUNTER & PAYMENTS
-   ============================================================ */
+function serveOrder(orderId) { return transition(orderId, 'SERVE', {}, 'Serve order', 'Marking served…', 'Order served!'); }
 function confirmCounter(orderId) {
   const o = (state.orders || []).find(x => x.OrderID === orderId);
   if (!o) return;
   openPaymentModal(o.OrderID, Number(o.GrandTotal || 0), Number(o.AmountPaid || 0));
 }
-
 async function rejectCounter(orderId) {
   const reason = prompt('Reason for rejection:');
   if (reason === null) return;
@@ -2607,13 +3461,8 @@ function openPaymentModal(orderId, due, alreadyPaid) {
 
 function togglePaySeniorPwdUI() {
   const isChecked = $('paySeniorPwdToggle').checked;
-  const fields = $('paySeniorPwdFields'), manualGrp = $('payManualDiscountGroup');
-
-  if (isChecked) {
-    fields.classList.remove('d-none'); manualGrp.classList.add('d-none');
-  } else {
-    fields.classList.add('d-none'); manualGrp.classList.remove('d-none');
-  }
+  $('paySeniorPwdFields').classList.toggle('d-none', !isChecked);
+  $('payManualDiscountGroup').classList.toggle('d-none', isChecked);
   recalcPaymentSummary();
 }
 
@@ -2629,8 +3478,7 @@ function togglePayDeliveryUI() {
 }
 
 function onDeliveryPlatformChange() {
-  const isOther = $('payDeliveryPlatform').value === 'Others';
-  $('payDeliveryOther').classList.toggle('d-none', !isOther);
+  $('payDeliveryOther').classList.toggle('d-none', $('payDeliveryPlatform').value !== 'Others');
 }
 
 function recalcPaymentSummary() {
@@ -2639,7 +3487,6 @@ function recalcPaymentSummary() {
   const gross = o ? Number(o.Subtotal || 0) : 0;
   const isSeniorPwd = $('paySeniorPwdToggle')?.checked || false;
   const manualDiscount = parseFloat($('payDiscount')?.value) || 0;
-
   const t = computeTotals(gross, isSeniorPwd, manualDiscount);
 
   if ($('paySeniorPctLabel')) $('paySeniorPctLabel').textContent = t.seniorPct;
@@ -2648,7 +3495,6 @@ function recalcPaymentSummary() {
   $('paySubtotalDisplay').textContent = `${curr()}${t.subtotal.toFixed(2)}`;
   $('payDiscountAmtDisplay').textContent = `-${curr()}${t.discount.toFixed(2)}`;
 
-  // Senior/PWD: VAT removed from the price
   const lvRow = $('payLessVatRowDisplay');
   if (lvRow) {
     lvRow.classList.toggle('d-none', !(t.lessVat > 0));
@@ -2656,42 +3502,24 @@ function recalcPaymentSummary() {
     if ($('payLessVatDisplay')) $('payLessVatDisplay').textContent = `-${curr()}${t.lessVat.toFixed(2)}`;
   }
 
-  // VAT row: only shown as an added line when prices are VAT-exclusive (or tax is off)
   const taxRow = $('payTaxRowDisplay');
   if (taxRow) {
     const showAdded = !(t.enableTax && t.inclusive);
     taxRow.classList.toggle('d-none', !showAdded);
     if (showAdded) {
-      if (t.enableTax) {
-        taxRow.innerHTML = `
-          <span class="text-secondary">VAT (${t.parsedTax}%)${isSeniorPwd ? ' - exempt' : ''}:</span>
-          <span id="payTaxDisplay" class="fw-semibold">${curr()}${t.tax.toFixed(2)}</span>
-        `;
-      } else {
-        taxRow.innerHTML = `
-          <span class="text-muted"><i class="fa-solid fa-ban me-1 text-danger"></i>Tax:</span>
-          <span class="badge bg-light text-secondary border">₱0.00 (No Tax)</span>
-        `;
-      }
+      taxRow.innerHTML = t.enableTax
+        ? `<span class="text-secondary">VAT (${t.parsedTax}%)${isSeniorPwd ? ' - exempt' : ''}:</span><span id="payTaxDisplay" class="fw-semibold">${curr()}${t.tax.toFixed(2)}</span>`
+        : `<span class="text-muted"><i class="fa-solid fa-ban me-1 text-danger"></i>Tax:</span><span class="badge bg-light text-secondary border">₱0.00 (No Tax)</span>`;
     }
   }
 
   const srvRow = $('payServiceRowDisplay');
   if (srvRow) {
-    if (t.enableSrv) {
-      srvRow.innerHTML = `
-        <span class="text-secondary">Service (${t.parsedSrv}%):</span>
-        <span id="payServiceDisplay" class="fw-semibold">${curr()}${t.srv.toFixed(2)}</span>
-      `;
-    } else {
-      srvRow.innerHTML = `
-        <span class="text-muted"><i class="fa-solid fa-ban me-1 text-danger"></i>Service Charge:</span>
-        <span class="badge bg-light text-secondary border">₱0.00 (No Service Charge)</span>
-      `;
-    }
+    srvRow.innerHTML = t.enableSrv
+      ? `<span class="text-secondary">Service (${t.parsedSrv}%):</span><span id="payServiceDisplay" class="fw-semibold">${curr()}${t.srv.toFixed(2)}</span>`
+      : `<span class="text-muted"><i class="fa-solid fa-ban me-1 text-danger"></i>Service Charge:</span><span class="badge bg-light text-secondary border">₱0.00 (No Service Charge)</span>`;
   }
 
-  // VAT breakdown (BIR style) when VAT is already inside the price
   const info = $('payVatInfoDisplay');
   if (info) {
     if (t.enableTax && t.inclusive) {
@@ -2728,9 +3556,7 @@ async function submitPayment() {
   const seniorPwdId = $('paySeniorPwdIdInput').value.trim();
   const manualDiscount = parseFloat($('payDiscount').value) || 0;
 
-  if (isSeniorPwd && !seniorPwdId) {
-    return toast('Please enter Senior Citizen / PWD ID #.', 'warning');
-  }
+  if (isSeniorPwd && !seniorPwdId) return toast('Please enter Senior Citizen / PWD ID #.', 'warning');
 
   const computedTotals = computeTotals(gross, isSeniorPwd, manualDiscount);
   const due = computedTotals.total - (o ? Number(o.AmountPaid || 0) : 0);
@@ -2748,19 +3574,10 @@ async function submitPayment() {
 
   const id = uuid();
   const payload = {
-    orderId,
-    amountReceived: received,
-    paymentMethod: method,
-    referenceNumber: ref,
-    clientId: id,
+    orderId, amountReceived: received, paymentMethod: method, referenceNumber: ref, clientId: id,
     customerName: $('payCustomerName').value || 'Walk-In Customer',
-    isSeniorPwd: isSeniorPwd,
-    seniorPwdId: seniorPwdId,
-    discount: manualDiscount,
-    discountReason: $('payDiscountReason').value || '',
-    computedTotals: computedTotals,
-    isDelivery: isDelivery,
-    deliveryPlatform: deliveryPlatform
+    isSeniorPwd, seniorPwdId, discount: manualDiscount, discountReason: $('payDiscountReason').value || '',
+    computedTotals, isDelivery, deliveryPlatform
   };
 
   try {
@@ -2805,12 +3622,8 @@ async function openReceiptModal(orderId) {
 }
 
 function renderReceiptPreview(data) {
-  const o = data.order || {};
-  const items = data.items || [];
-  const payments = data.payments || [];
-  const s = data.settings || {};
+  const o = data.order || {}, items = data.items || [], payments = data.payments || [], s = data.settings || {};
   const c = s.CURRENCY_SYMBOL || '₱';
-
   const fmt = (n) => c + Number(n || 0).toFixed(2);
   const lastPay = payments.length ? payments[payments.length - 1] : {};
 
@@ -2818,7 +3631,6 @@ function renderReceiptPreview(data) {
   const dateStr = orderDateObj.toLocaleDateString();
   const timeStr = orderDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-  // ---- Totals block (Philippine VAT presentation) ----
   const taxPct = (s.TAX_RATE_PERCENT !== undefined && s.TAX_RATE_PERCENT !== '') ? parseFloat(s.TAX_RATE_PERCENT) || 12 : 12;
   const hasVatFields = (o.VatableSales !== undefined && o.VatableSales !== '') || (o.VatExemptSales !== undefined && o.VatExemptSales !== '');
   const inclusive = hasVatFields && s.VAT_INCLUSIVE !== 'false';
@@ -2858,19 +3670,15 @@ function renderReceiptPreview(data) {
     </div>
     <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
     <div style="font-size:0.8rem; display:flex; justify-content:space-between;">
-      <span>Server (Waiter):</span>
-      <strong>${escapeHtml(o.WaiterName || '—')}</strong>
+      <span>Server (Waiter):</span><strong>${escapeHtml(o.WaiterName || '—')}</strong>
     </div>
     <div style="font-size:0.8rem; display:flex; justify-content:space-between;">
-      <span>Cashier (Counter):</span>
-      <strong>${escapeHtml(o.CounterName || '—')}</strong>
+      <span>Cashier (Counter):</span><strong>${escapeHtml(o.CounterName || '—')}</strong>
     </div>
     <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
     <div style="font-size:0.85rem;">${itemsHtml}</div>
     <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    <div style="font-size:0.8rem;">
-      ${receiptRows}
-    </div>
+    <div style="font-size:0.8rem;">${receiptRows}</div>
     <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
     <div style="font-size:0.8rem;">
       <div style="display:flex; justify-content:space-between;"><span>Paid (${escapeHtml(lastPay.PaymentMethod || 'Cash')}${lastPay.DeliveryPlatform ? ' - ' + escapeHtml(lastPay.DeliveryPlatform) : ''})</span><span>${fmt(o.AmountPaid)}</span></div>
@@ -2887,23 +3695,14 @@ function printReceipt() {
   printHtmlDocument('Print Receipt', content.innerHTML, 'receipt');
 }
 
-/* ============================================================
-   ACTIONS: KITCHEN
-   ============================================================ */
-function kitchenAccept(orderId) {
-  return transition(orderId, 'ACCEPT_KITCHEN', {}, 'Accept order', 'Accepting…', 'Order accepted!');
-}
-
+function kitchenAccept(orderId) { return transition(orderId, 'ACCEPT_KITCHEN', {}, 'Accept order', 'Accepting…', 'Order accepted!'); }
 async function kitchenStartPrep(orderId) {
   const inputEl = $(`prep_${orderId}`);
   const mins = parseInt(inputEl ? inputEl.value : (state.prepInputs[orderId] || 15), 10) || 15;
   const r = await transition(orderId, 'START_PREP', { prepMinutes: mins }, 'Start prep', 'Starting prep…', 'Prep started!');
   if (r) delete state.prepInputs[orderId];
 }
-
-function kitchenReady(orderId) {
-  return transition(orderId, 'MARK_READY', {}, 'Mark ready', 'Marking ready…', 'Order ready!');
-}
+function kitchenReady(orderId) { return transition(orderId, 'MARK_READY', {}, 'Mark ready', 'Marking ready…', 'Order ready!'); }
 
 /* ============================================================
    ORDER MODAL & BASKET COMPUTATIONS
@@ -2911,9 +3710,8 @@ function kitchenReady(orderId) {
 function openOrderModal() {
   state.cart = []; state.activeCategoryFilter = 'ALL';
   $('menuSearch').value = '';
-
   const sel = $('cartTableSelect');
-  sel.innerHTML = (state.tables || [])
+  sel.innerHTML = '<option value="">Takeout / Walk-In</option>' + (state.tables || [])
     .filter(t => t.Status === 'Available')
     .map(t => `<option value="${escapeHtml(t.TableID)}|${escapeHtml(t.TableNumber)}">${escapeHtml(t.TableNumber)}</option>`)
     .join('');
@@ -2924,29 +3722,21 @@ function openOrderModal() {
 function renderPOSCategoryTabs() {
   const container = $('posCategoryTabs');
   if (!container) return;
-
   const cats = Array.isArray(state.categories) ? state.categories : [];
   let html = `<button type="button" class="btn btn-sm ${state.activeCategoryFilter === 'ALL' ? 'btn-primary' : 'btn-outline-secondary'} rounded-pill px-3" onclick="selectPOSCategory('ALL')">All</button>`;
-
   cats.forEach(c => {
     const isActive = state.activeCategoryFilter === c.CategoryID;
     html += `<button type="button" class="btn btn-sm ${isActive ? 'btn-primary' : 'btn-outline-secondary'} rounded-pill px-3" onclick="selectPOSCategory('${c.CategoryID}')">${escapeHtml(c.CategoryName)}</button>`;
   });
-
   container.innerHTML = html;
 }
 
-function selectPOSCategory(catId) {
-  state.activeCategoryFilter = catId;
-  renderPOSCategoryTabs(); renderPOSMenu();
-}
-
+function selectPOSCategory(catId) { state.activeCategoryFilter = catId; renderPOSCategoryTabs(); renderPOSMenu(); }
 const onMenuSearch = debounce(() => renderPOSMenu(), 120);
 
 function renderPOSMenu() {
   const term = ($('menuSearch')?.value || '').toLowerCase();
   const menuList = Array.isArray(state.menu) ? state.menu : [];
-  
   const items = menuList.filter(m => {
     const isAvail = m.Available !== false && m.Available !== 'false' && m.Available !== 'FALSE';
     const matchesSearch = !term || String(m.ItemName || '').toLowerCase().includes(term);
@@ -2956,7 +3746,6 @@ function renderPOSMenu() {
 
   const grid = $('posMenuGrid');
   if (!grid) return;
-
   if (items.length === 0) {
     grid.innerHTML = `<div class="col-12 text-center text-muted py-4"><i class="fa-solid fa-utensils fa-2x mb-2"></i><br>No available menu items found.</div>`;
     return;
@@ -2980,18 +3769,10 @@ function addToCart(menuItemId) {
   if (!item) return;
   const existing = state.cart.find(c => c.menuItemId === menuItemId);
   if (existing) existing.quantity++;
-  else state.cart.push({
-    menuItemId, itemName: item.ItemName, price: Number(item.Price || 0),
-    quantity: 1, station: item.Station
-  });
+  else state.cart.push({ menuItemId, itemName: item.ItemName, price: Number(item.Price || 0), quantity: 1, station: item.Station });
   updateCartDisplay();
 }
 
-/* Philippine VAT / discount engine (mirrors computeBill in Code.gs)
-   - Prices are VAT-inclusive by default (Settings > "Menu prices already include VAT").
-   - Senior/PWD: VAT removed first (price / 1.12), then 20% off the VAT-exclusive price; VAT-exempt.
-   - Regular discount comes off the gross price, VAT is then computed on what is actually paid.
-   - Service charge is on the discounted amount and is part of the VAT-able sale. */
 function computeTotals(gross, isSeniorPwd, manualDiscount) {
   const s = state.settings;
   const rawTaxStr = s.TAX_RATE_PERCENT, rawSrvStr = s.SERVICE_CHARGE_PERCENT;
@@ -3050,7 +3831,6 @@ function computeTotals(gross, isSeniorPwd, manualDiscount) {
 function updateCartDisplay() {
   const list = $('cartItemsList');
   if (!list) return;
-
   list.innerHTML = state.cart.map((it, idx) => `
     <div class="d-flex justify-content-between align-items-center small mb-1">
       <span>${escapeHtml(it.itemName)} ×${it.quantity}</span>
@@ -3060,15 +3840,11 @@ function updateCartDisplay() {
       </div>
     </div>
   `).join('');
-
   const gross = state.cart.reduce((s, i) => s + i.price * i.quantity, 0);
   $('cartSubtotal').textContent = `${curr()}${gross.toFixed(2)}`;
 }
 
-function removeFromCart(idx) {
-  state.cart.splice(idx, 1);
-  updateCartDisplay();
-}
+function removeFromCart(idx) { state.cart.splice(idx, 1); updateCartDisplay(); }
 
 async function submitOrder() {
   if (state.submitting) return;
@@ -3082,12 +3858,7 @@ async function submitOrder() {
 
   const gross = state.cart.reduce((s, i) => s + i.price * i.quantity, 0);
   const id = uuid();
-  const payload = {
-    clientId: id,
-    tableId, tableNumber,
-    subtotal: gross,
-    items: state.cart.map(i => ({ ...i }))
-  };
+  const payload = { clientId: id, tableId, tableNumber, subtotal: gross, items: state.cart.map(i => ({ ...i })) };
 
   state.submitting = true;
   try {
@@ -3095,24 +3866,16 @@ async function submitOrder() {
     const r = await runAction('createOrder', [payload], id, 'New order');
     showDone(r.queued ? 'Order saved offline — will sync automatically' : `Order ${r.res.orderNumber} submitted!`, () => {
       hideModal('orderModal');
-
-      // Go straight to the Counter page for roles that can access it
-      const canOpenCounter = state.user && ['Counter', 'Admin'].includes(state.user.role);
-      if (canOpenCounter) switchView('counter');
-
+      if (state.user && ['Counter', 'Admin'].includes(state.user.role)) switchView('counter');
       if (!r.queued) poll(true);
     });
-  } catch (err) {
-    hideLoading();
-    toast(err.message, 'danger');
-  } finally { state.submitting = false; }
+  } catch (err) { hideLoading(); toast(err.message, 'danger'); } finally { state.submitting = false; }
 }
 
 /* ============================================================
-   ADMIN: MENU IMAGE PREVIEW & EDITING
+   ADMIN: MENU, TABLES, CATEGORIES, USERS & REPORTS
    ============================================================ */
-function compressImageFile(file, maxChars) {
-  maxChars = maxChars || 42000;
+function compressImageFile(file, maxChars = 42000) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('Could not read image'));
@@ -3150,10 +3913,7 @@ async function previewMenuImage(input) {
       $('cfgMenuImagePreview').src = dataUrl;
       $('cfgMenuImagePreview').classList.remove('d-none');
       $('cfgMenuNoImgText').classList.add('d-none');
-    } catch (err) {
-      input.value = '';
-      toast(err.message, 'danger');
-    }
+    } catch (err) { input.value = ''; toast(err.message, 'danger'); }
   }
 }
 
@@ -3167,19 +3927,12 @@ function resetMenuForm() {
   $('cfgMenuFormTitle').textContent = 'Add Menu Item';
 }
 
-function editMenuItemById(id) {
-  const m = state.menuById[id];
-  if (m) editMenuItem(m);
-}
-
+function editMenuItemById(id) { const m = state.menuById[id]; if (m) editMenuItem(m); }
 function editMenuItem(m) {
-  $('cfgMenuId').value = m.MenuItemID;
-  $('cfgMenuName').value = m.ItemName;
-  $('cfgMenuCategory').value = m.CategoryID;
-  $('cfgMenuPrice').value = m.Price;
+  $('cfgMenuId').value = m.MenuItemID; $('cfgMenuName').value = m.ItemName;
+  $('cfgMenuCategory').value = m.CategoryID; $('cfgMenuPrice').value = m.Price;
   $('cfgMenuStation').value = m.Station || 'Kitchen';
   $('cfgMenuAvailable').value = (m.Available === true || m.Available === 'true' || m.Available === 'TRUE') ? 'true' : 'false';
-  
   $('cfgMenuImageUrl').value = m.ImageURL || '';
   if (m.ImageURL) {
     $('cfgMenuImagePreview').src = m.ImageURL;
@@ -3190,7 +3943,6 @@ function editMenuItem(m) {
     $('cfgMenuImagePreview').classList.add('d-none');
     $('cfgMenuNoImgText').classList.remove('d-none');
   }
-
   $('cfgMenuFormTitle').textContent = `Edit Menu Item (${m.ItemName})`;
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -3200,27 +3952,16 @@ async function saveMenuItem(e) {
   try {
     showLoading('Saving menu item…');
     await callServer('saveMenuItem', state.token, {
-      MenuItemID: $('cfgMenuId').value,
-      ItemName: $('cfgMenuName').value,
-      CategoryID: $('cfgMenuCategory').value,
-      Price: $('cfgMenuPrice').value,
-      Station: $('cfgMenuStation').value,
-      Available: $('cfgMenuAvailable').value === 'true',
-      ImageURL: $('cfgMenuImageUrl').value
+      MenuItemID: $('cfgMenuId').value, ItemName: $('cfgMenuName').value, CategoryID: $('cfgMenuCategory').value,
+      Price: $('cfgMenuPrice').value, Station: $('cfgMenuStation').value,
+      Available: $('cfgMenuAvailable').value === 'true', ImageURL: $('cfgMenuImageUrl').value
     });
-    showDone('Menu item saved!', () => {
-      resetMenuForm(); loadBootstrap();
-    });
+    showDone('Menu item saved!', () => { resetMenuForm(); loadBootstrap(); });
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
-/* ============================================================
-   ADMIN: TABLES FORM, EDIT, & DELETE HANDLERS
-   ============================================================ */
 function resetTableForm() {
-  $('cfgTableId').value = '';
-  $('cfgTableName').value = '';
-  $('cfgTableCapacity').value = 4;
+  $('cfgTableId').value = ''; $('cfgTableName').value = ''; $('cfgTableCapacity').value = 4;
   $('cfgTableFormTitle').textContent = 'Add / Edit Table';
   $('cfgTableSubmitBtn').innerHTML = '<i class="fa-solid fa-floppy-disk me-1"></i>Save Table';
 }
@@ -3228,10 +3969,7 @@ function resetTableForm() {
 function editTableById(tableId) {
   const t = (state.tables || []).find(x => x.TableID === tableId);
   if (!t) return;
-
-  $('cfgTableId').value = t.TableID;
-  $('cfgTableName').value = t.TableNumber;
-  $('cfgTableCapacity').value = t.Capacity || 4;
+  $('cfgTableId').value = t.TableID; $('cfgTableName').value = t.TableNumber; $('cfgTableCapacity').value = t.Capacity || 4;
   $('cfgTableFormTitle').textContent = `Edit Table (${t.TableNumber})`;
   $('cfgTableSubmitBtn').innerHTML = '<i class="fa-solid fa-pen-to-square me-1"></i>Update Table';
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -3239,31 +3977,19 @@ function editTableById(tableId) {
 
 async function deleteTableById(tableId, tableNumber) {
   if (!confirm(`Are you sure you want to delete "${tableNumber}"?\nThis action cannot be undone.`)) return;
-
   try {
     showLoading(`Deleting ${tableNumber}…`);
     const res = await callServer('deleteTable', state.token, tableId);
-    showDone(res.message, () => {
-      resetTableForm();
-      loadBootstrap();
-      poll(true);
-    });
-  } catch (err) {
-    hideLoading();
-    toast(err.message, 'danger');
-  }
+    showDone(res.message, () => { resetTableForm(); loadBootstrap(); poll(true); });
+  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
-/* ============================================================
-   ADMIN: FORMS & REPORTS
-   ============================================================ */
 function populateAdminForms() {
   if (!state.user || state.user.role !== 'Admin') return;
-
   $('cfgRestaurantName').value = state.settings.RESTAURANT_NAME || '';
-  $('cfgTaxRate').value = (state.settings.TAX_RATE_PERCENT !== undefined && state.settings.TAX_RATE_PERCENT !== null && state.settings.TAX_RATE_PERCENT !== '') ? state.settings.TAX_RATE_PERCENT : 12;
-  $('cfgServiceCharge').value = (state.settings.SERVICE_CHARGE_PERCENT !== undefined && state.settings.SERVICE_CHARGE_PERCENT !== null && state.settings.SERVICE_CHARGE_PERCENT !== '') ? state.settings.SERVICE_CHARGE_PERCENT : 5;
-  $('cfgSeniorPwdDiscount').value = (state.settings.SENIOR_PWD_DISCOUNT_PERCENT !== undefined && state.settings.SENIOR_PWD_DISCOUNT_PERCENT !== null && state.settings.SENIOR_PWD_DISCOUNT_PERCENT !== '') ? state.settings.SENIOR_PWD_DISCOUNT_PERCENT : 20;
+  $('cfgTaxRate').value = state.settings.TAX_RATE_PERCENT ?? 12;
+  $('cfgServiceCharge').value = state.settings.SERVICE_CHARGE_PERCENT ?? 5;
+  $('cfgSeniorPwdDiscount').value = state.settings.SENIOR_PWD_DISCOUNT_PERCENT ?? 20;
   $('cfgEnableTax').checked = state.settings.ENABLE_TAX !== 'false';
   $('cfgVatInclusive').checked = state.settings.VAT_INCLUSIVE !== 'false';
   $('cfgEnableServiceCharge').checked = state.settings.ENABLE_SERVICE_CHARGE !== 'false';
@@ -3274,77 +4000,52 @@ function populateAdminForms() {
 
   const catList = Array.isArray(state.categories) ? state.categories : [];
   const prevCat = $('cfgMenuCategory').value;
-  $('cfgMenuCategory').innerHTML = catList.map(c =>
-    `<option value="${c.CategoryID}">${escapeHtml(c.CategoryName)}</option>`).join('');
+  $('cfgMenuCategory').innerHTML = catList.map(c => `<option value="${c.CategoryID}">${escapeHtml(c.CategoryName)}</option>`).join('');
   if (prevCat) $('cfgMenuCategory').value = prevCat;
 
   const catById = {};
   catList.forEach(c => { catById[c.CategoryID] = c; });
 
-  const menuList = Array.isArray(state.menu) ? state.menu : [];
-  setHtml($('menuTableBody'), menuList.map(m => {
+  setHtml($('menuTableBody'), (state.menu || []).map(m => {
     const cat = catById[m.CategoryID];
     const isAvail = m.Available === true || m.Available === 'true' || m.Available === 'TRUE';
-    const statusBadge = isAvail ? '<span class="badge bg-success">Available</span>' : '<span class="badge bg-danger">Unavailable</span>';
-
-    const thumbHtml = m.ImageURL 
+    const thumbHtml = m.ImageURL
       ? `<img src="${escapeHtml(m.ImageURL)}" loading="lazy" decoding="async" class="img-preview-thumb" alt="Item">`
       : `<div class="img-preview-thumb d-flex align-items-center justify-content-center text-muted"><i class="fa-solid fa-utensils"></i></div>`;
-
     return `<tr>
-      <td>${thumbHtml}</td>
-      <td><strong>${escapeHtml(m.ItemName)}</strong></td>
-      <td>${escapeHtml(cat ? cat.CategoryName : '')}</td>
-      <td>${curr()}${Number(m.Price || 0).toFixed(2)}</td>
-      <td><span class="badge bg-dark">${escapeHtml(m.Station || 'Kitchen')}</span></td>
-      <td>${statusBadge}</td>
+      <td>${thumbHtml}</td><td><strong>${escapeHtml(m.ItemName)}</strong></td><td>${escapeHtml(cat ? cat.CategoryName : '')}</td>
+      <td>${curr()}${Number(m.Price || 0).toFixed(2)}</td><td><span class="badge bg-dark">${escapeHtml(m.Station || 'Kitchen')}</span></td>
+      <td>${isAvail ? '<span class="badge bg-success">Available</span>' : '<span class="badge bg-danger">Unavailable</span>'}</td>
       <td><button class="btn btn-sm btn-outline-primary fw-bold" onclick="editMenuItemById('${m.MenuItemID}')"><i class="fa-solid fa-pen-to-square me-1"></i>Edit</button></td>
     </tr>`;
   }).join(''));
 
-  const tableList = Array.isArray(state.tables) ? state.tables : [];
-  setHtml($('tablesTableBody'), tableList.map(t => `
+  setHtml($('tablesTableBody'), (state.tables || []).map(t => `
     <tr>
-      <td><strong>${escapeHtml(t.TableNumber)}</strong></td>
-      <td>${escapeHtml(t.Capacity)} seats</td>
+      <td><strong>${escapeHtml(t.TableNumber)}</strong></td><td>${escapeHtml(t.Capacity)} seats</td>
       <td><span class="badge bg-secondary">${escapeHtml(t.Status)}</span></td>
       <td class="text-end">
-        <button class="btn btn-sm btn-outline-primary fw-bold me-1" onclick="editTableById('${escapeHtml(t.TableID)}')">
-          <i class="fa-solid fa-pen-to-square me-1"></i>Edit
-        </button>
-        <button class="btn btn-sm btn-outline-danger fw-bold" onclick="deleteTableById('${escapeHtml(t.TableID)}', '${escapeHtml(t.TableNumber)}')">
-          <i class="fa-solid fa-trash-can me-1"></i>Delete
-        </button>
+        <button class="btn btn-sm btn-outline-primary fw-bold me-1" onclick="editTableById('${escapeHtml(t.TableID)}')"><i class="fa-solid fa-pen-to-square me-1"></i>Edit</button>
+        <button class="btn btn-sm btn-outline-danger fw-bold" onclick="deleteTableById('${escapeHtml(t.TableID)}', '${escapeHtml(t.TableNumber)}')"><i class="fa-solid fa-trash-can me-1"></i>Delete</button>
       </td>
-    </tr>
-  `).join(''));
+    </tr>`).join(''));
 
   setHtml($('categoriesList'), catList.map(c => `
     <div class="d-flex justify-content-between border-bottom py-2">
       <div><strong>${escapeHtml(c.CategoryName)}</strong> <small class="text-muted">${escapeHtml(c.Description || '')}</small></div>
       <span class="badge bg-info">Sort ${escapeHtml(c.SortOrder)}</span>
-    </div>
-  `).join(''));
+    </div>`).join(''));
 
-  const userList = Array.isArray(state.users) ? state.users : [];
-  setHtml($('usersTableBody'), userList.map(u => `
+  setHtml($('usersTableBody'), (state.users || []).map(u => `
     <tr><td>${escapeHtml(u.FullName)}</td><td>${escapeHtml(u.Username)}</td>
       <td><span class="badge bg-primary">${escapeHtml(u.Role)}</span></td>
-      <td>${(u.Active === true || u.Active === 'TRUE' || u.Active === 'true') ? '✓' : '✗'}</td>
-      <td class="small text-muted">${u.LastLogin ? new Date(u.LastLogin).toLocaleString() : '—'}</td></tr>
-  `).join(''));
+      <td>${u.Active ? '✓' : '✗'}</td>
+      <td class="small text-muted">${u.LastLogin ? new Date(u.LastLogin).toLocaleString() : '—'}</td></tr>`).join(''));
 }
 
 function onToggleDisableKds(el) {
-  if (!el.checked) return; // turning the KDS back on needs no confirmation
-  const ok = confirm(
-    'Disable the Kitchen Display System?\n\n' +
-    '• The Kitchen screen will be hidden for all users.\n' +
-    '• "Waiting for Kitchen / Serving…" will be removed from the Counter order tickets.\n' +
-    '• Paid orders go straight to serving. Use Print Kitchen Ticket to send orders to the kitchen.\n\n' +
-    'The change takes effect after you click Save Settings.'
-  );
-  if (!ok) el.checked = false;
+  if (!el.checked) return;
+  if (!confirm('Disable the Kitchen Display System?\n\n• The Kitchen screen will be hidden for all users.\n• Paid orders go straight to serving.\n\nClick Save Settings to apply.')) el.checked = false;
 }
 
 async function saveSettings(e) {
@@ -3352,17 +4053,12 @@ async function saveSettings(e) {
   try {
     showLoading('Saving settings…');
     await callServer('saveSystemSettings', state.token, {
-      RESTAURANT_NAME: $('cfgRestaurantName').value,
-      TAX_RATE_PERCENT: $('cfgTaxRate').value,
-      SERVICE_CHARGE_PERCENT: $('cfgServiceCharge').value,
-      SENIOR_PWD_DISCOUNT_PERCENT: $('cfgSeniorPwdDiscount').value,
-      ENABLE_TAX: $('cfgEnableTax').checked ? 'true' : 'false',
-      VAT_INCLUSIVE: $('cfgVatInclusive').checked ? 'true' : 'false',
+      RESTAURANT_NAME: $('cfgRestaurantName').value, TAX_RATE_PERCENT: $('cfgTaxRate').value,
+      SERVICE_CHARGE_PERCENT: $('cfgServiceCharge').value, SENIOR_PWD_DISCOUNT_PERCENT: $('cfgSeniorPwdDiscount').value,
+      ENABLE_TAX: $('cfgEnableTax').checked ? 'true' : 'false', VAT_INCLUSIVE: $('cfgVatInclusive').checked ? 'true' : 'false',
       ENABLE_SERVICE_CHARGE: $('cfgEnableServiceCharge').checked ? 'true' : 'false',
       DISABLE_KDS: $('cfgDisableKds').checked ? 'true' : 'false',
-      CURRENCY_SYMBOL: $('cfgCurrency').value,
-      TIMEZONE: $('cfgTimezone').value,
-      RECEIPT_FOOTER: $('cfgReceiptFooter').value
+      CURRENCY_SYMBOL: $('cfgCurrency').value, TIMEZONE: $('cfgTimezone').value, RECEIPT_FOOTER: $('cfgReceiptFooter').value
     });
     showDone('Settings saved!', () => { loadBootstrap(); poll(true); });
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
@@ -3372,16 +4068,8 @@ async function saveTable(e) {
   e.preventDefault();
   try {
     showLoading('Saving table…');
-    await callServer('saveTable', state.token, {
-      TableID: $('cfgTableId').value,
-      TableNumber: $('cfgTableName').value,
-      Capacity: $('cfgTableCapacity').value
-    });
-    showDone('Table saved!', () => {
-      resetTableForm();
-      loadBootstrap();
-      poll(true);
-    });
+    await callServer('saveTable', state.token, { TableID: $('cfgTableId').value, TableNumber: $('cfgTableName').value, Capacity: $('cfgTableCapacity').value });
+    showDone('Table saved!', () => { resetTableForm(); loadBootstrap(); poll(true); });
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
@@ -3389,12 +4077,8 @@ async function saveCategory(e) {
   e.preventDefault();
   try {
     showLoading('Saving…');
-    await callServer('saveCategory', state.token, {
-      CategoryName: $('cfgCatName').value, Description: $('cfgCatDesc').value
-    });
-    showDone('Category saved!', () => {
-      $('cfgCatName').value = ''; $('cfgCatDesc').value = ''; loadBootstrap();
-    });
+    await callServer('saveCategory', state.token, { CategoryName: $('cfgCatName').value, Description: $('cfgCatDesc').value });
+    showDone('Category saved!', () => { $('cfgCatName').value = ''; $('cfgCatDesc').value = ''; loadBootstrap(); });
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
@@ -3403,15 +4087,10 @@ async function saveUser(e) {
   try {
     showLoading('Saving…');
     await callServer('saveUser', state.token, {
-      UserID: $('cfgUserId').value, FullName: $('cfgUserFullName').value,
-      Username: $('cfgUserUsername').value, Password: $('cfgUserPassword').value,
-      NewPassword: $('cfgUserPassword').value, Role: $('cfgUserRole').value
+      UserID: $('cfgUserId').value, FullName: $('cfgUserFullName').value, Username: $('cfgUserUsername').value,
+      Password: $('cfgUserPassword').value, NewPassword: $('cfgUserPassword').value, Role: $('cfgUserRole').value
     });
-    showDone('User saved!', () => {
-      $('cfgUserId').value = ''; $('cfgUserFullName').value = '';
-      $('cfgUserUsername').value = ''; $('cfgUserPassword').value = '';
-      loadBootstrap();
-    });
+    showDone('User saved!', () => { $('cfgUserId').value = ''; $('cfgUserFullName').value = ''; $('cfgUserUsername').value = ''; $('cfgUserPassword').value = ''; loadBootstrap(); });
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
@@ -3428,19 +4107,16 @@ async function loadAdminStats() {
 async function loadActivityLogs() {
   try {
     const logs = await callServer('getActivityLog', state.token, { limit: 300 });
-    const logList = Array.isArray(logs) ? logs : [];
-    $('logsTableBody').innerHTML = logList.map(l => `
+    $('logsTableBody').innerHTML = (logs || []).map(l => `
       <tr><td class="small">${new Date(l.Timestamp).toLocaleString()}</td>
-        <td class="small">${escapeHtml(l.UserID)}</td>
-        <td>${escapeHtml(l.Action)}</td>
+        <td class="small">${escapeHtml(l.UserID)}</td><td>${escapeHtml(l.Action)}</td>
         <td>${escapeHtml(l.EntityType)} ${escapeHtml(l.EntityID || '')}</td>
-        <td class="small text-muted">${escapeHtml(String(l.NewValue || '').slice(0, 80))}</td></tr>
-    `).join('');
+        <td class="small text-muted">${escapeHtml(String(l.NewValue || '').slice(0, 80))}</td></tr>`).join('');
   } catch (e) { if (!e.isNetwork) toast(e.message, 'danger'); }
 }
 
 /* ============================================================
-   SALES REPORT
+   SALES REPORT & EOD
    ============================================================ */
 let _lastSalesReport = null;
 
@@ -3469,9 +4145,7 @@ function clearSalesReportUI() {
 async function loadSalesReport() {
   try {
     showLoading('Generating sales report…');
-    const data = await callServer('getSalesReport', state.token, {
-      startDate: $('reportStart').value || null, endDate: $('reportEnd').value || null
-    });
+    const data = await callServer('getSalesReport', state.token, { startDate: $('reportStart').value || null, endDate: $('reportEnd').value || null });
     hideLoading();
     _lastSalesReport = data;
     renderSalesReport(data);
@@ -3486,638 +4160,271 @@ function renderSalesReport(d) {
 
   const kpi = (bg, label, val) => `<div class="col-6 col-md-3"><div class="stat-card ${bg}"><h6>${label}</h6><h4>${val}</h4></div></div>`;
   const table = (heads, rows, empty) => rows.length
-    ? `<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0"><thead><tr>${
-        heads.map(x => x.charAt(0) === '>' ? `<th class="text-end">${x.slice(1)}</th>` : `<th>${x}</th>`).join('')
-      }</tr></thead><tbody>${rows.join('')}</tbody></table></div>`
+    ? `<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0"><thead><tr>${heads.map(x => x.charAt(0) === '>' ? `<th class="text-end">${x.slice(1)}</th>` : `<th>${x}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`
     : `<div class="small text-muted">${empty || 'No data for this period'}</div>`;
   const box = (title, inner) => `<div class="col-12 col-md-6"><div class="border rounded p-2 bg-white h-100"><h6 class="fw-bold small text-uppercase text-muted">${title}</h6>${inner}</div></div>`;
   const R = 'class="text-end"';
 
-  // ---- KPI cards ----
   $('reportSummary').innerHTML = `
-    <div class="small text-muted mb-2">${d.range && (d.range.start || d.range.end)
-      ? `Period: <strong>${escapeHtml(d.range.start || 'beginning')}</strong> to <strong>${escapeHtml(d.range.end || 'today')}</strong>`
-      : 'Period: <strong>All time</strong>'} · Generated ${escapeHtml(d.generatedLabel || '')}</div>
-    <div class="row g-2 mb-2">
-      ${kpi('bg-primary', 'Net Sales', fmt(t.sales))}
-      ${kpi('bg-success', 'Paid Orders', num(cn.paid))}
-      ${kpi('bg-warning', 'Avg Order Value', fmt(d.averageOrderValue))}
-      ${kpi('bg-info', 'Items Sold', num(t.items))}
-    </div>
-    <div class="row g-2">
-      ${kpi('bg-secondary', 'Gross Subtotal', fmt(t.subtotal))}
-      ${kpi('bg-danger', 'Discounts', '-' + fmt(t.discount))}
-      ${kpi('bg-dark', 'Tax Collected', fmt(t.tax))}
-      ${kpi('bg-primary', 'Service Charge', fmt(t.service))}
-    </div>`;
+    <div class="small text-muted mb-2">${d.range && (d.range.start || d.range.end) ? `Period: <strong>${escapeHtml(d.range.start || 'beginning')}</strong> to <strong>${escapeHtml(d.range.end || 'today')}</strong>` : 'Period: <strong>All time</strong>'} · Generated ${escapeHtml(d.generatedLabel || '')}</div>
+    <div class="row g-2 mb-2">${kpi('bg-primary', 'Net Sales', fmt(t.sales))}${kpi('bg-success', 'Paid Orders', num(cn.paid))}${kpi('bg-warning', 'Avg Order Value', fmt(d.averageOrderValue))}${kpi('bg-info', 'Items Sold', num(t.items))}</div>
+    <div class="row g-2">${kpi('bg-secondary', 'Gross Subtotal', fmt(t.subtotal))}${kpi('bg-danger', 'Discounts', '-' + fmt(t.discount))}${kpi('bg-dark', 'Tax Collected', fmt(t.tax))}${kpi('bg-primary', 'Service Charge', fmt(t.service))}</div>`;
 
-  // ---- Highlights ----
-  const hl = [];
-  hl.push(['Best Day', h.bestDay ? `${escapeHtml(h.bestDay.date)} — ${fmt(h.bestDay.sales)} (${h.bestDay.orders} orders)` : '—']);
-  hl.push(['Peak Hour', h.peakHour ? `${escapeHtml(h.peakHour.label)} — ${fmt(h.peakHour.sales)} (${h.peakHour.orders} orders)` : '—']);
-  hl.push(['Avg Items / Order', h.avgItemsPerOrder || 0]);
-  hl.push(['Avg Item Price', fmt(h.avgItemPrice)]);
-  hl.push(['Cancelled / Voided Orders', num(cn.cancelled)]);
-  hl.push(['Open / Unpaid Orders', `${num(cn.open)}${cn.open ? ' (' + fmt(cn.openValue) + ')' : ''}`]);
-  hl.push(['Discounted Orders', `${num(ds.orders)} (${ds.rate || 0}% of gross)`]);
-  hl.push(['Senior / PWD Discounts', `${num(ds.seniorOrders)} orders · -${fmt(ds.seniorAmount)}`]);
-  hl.push(['Manual Discounts', '-' + fmt(ds.manualAmount)]);
-  $('reportHighlights').innerHTML = `<div class="row g-1">${hl.map(x =>
-    `<div class="col-12 col-md-6"><div class="d-flex justify-content-between small border-bottom py-1"><span class="text-muted">${x[0]}</span><strong>${x[1]}</strong></div></div>`
-  ).join('')}</div>`;
+  const hl = [
+    ['Best Day', h.bestDay ? `${escapeHtml(h.bestDay.date)} — ${fmt(h.bestDay.sales)} (${h.bestDay.orders} orders)` : '—'],
+    ['Peak Hour', h.peakHour ? `${escapeHtml(h.peakHour.label)} — ${fmt(h.peakHour.sales)} (${h.peakHour.orders} orders)` : '—'],
+    ['Avg Items / Order', h.avgItemsPerOrder || 0], ['Avg Item Price', fmt(h.avgItemPrice)],
+    ['Cancelled / Voided Orders', num(cn.cancelled)], ['Open / Unpaid Orders', `${num(cn.open)} (${fmt(cn.openValue)})`]
+  ];
+  $('reportHighlights').innerHTML = `<div class="row g-2">${hl.map(x => `<div class="col-6 col-md-4"><div class="border rounded px-2 py-1 bg-light"><div class="small text-muted">${x[0]}</div><div class="fw-bold small">${x[1]}</div></div></div>`).join('')}</div>`;
 
-  // ---- Breakdowns ----
-  const pmRows = (d.paymentMethods || []).map(m =>
-    `<tr><td>${escapeHtml(m.label)}</td><td ${R}>${m.count}</td><td ${R}>${fmt(m.amount)}</td><td ${R}>${m.share}%</td></tr>`);
-  const pfRows = (d.deliveryPlatforms || []).map(m =>
-    `<tr><td>${escapeHtml(m.name)}</td><td ${R}>${m.orders}</td><td ${R}>${fmt(m.sales)}</td><td ${R}>${m.share}%</td></tr>`);
-  const catRows = (d.categories || []).map(m =>
-    `<tr><td>${escapeHtml(m.name)}</td><td ${R}>${num(m.quantity)}</td><td ${R}>${fmt(m.sales)}</td><td ${R}>${m.share}%</td></tr>`);
-  const stRows = (d.stations || []).map(m =>
-    `<tr><td>${escapeHtml(m.name)}</td><td ${R}>${num(m.quantity)}</td><td ${R}>${fmt(m.sales)}</td><td ${R}>${m.share}%</td></tr>`);
-  const hrRows = (d.hourly || []).map(m =>
-    `<tr><td>${escapeHtml(m.label)}</td><td ${R}>${m.orders}</td><td ${R}>${fmt(m.sales)}</td><td ${R}>${fmt(m.orders ? m.sales / m.orders : 0)}</td></tr>`);
-  const wRows = (d.waiters || []).map(m =>
-    `<tr><td>${escapeHtml(m.name)}</td><td ${R}>${m.orders}</td><td ${R}>${fmt(m.sales)}</td></tr>`);
-  const cRows = (d.cashiers || []).map(m =>
-    `<tr><td>${escapeHtml(m.name)}</td><td ${R}>${m.orders}</td><td ${R}>${fmt(m.sales)}</td></tr>`);
+  const panels = [
+    box('Payment Methods', table(['Method', '>Orders', '>Sales', '>Share'], (d.paymentMethods || []).map(m => `<tr><td>${escapeHtml(m.label)}</td><td ${R}>${m.count}</td><td ${R}>${fmt(m.amount)}</td><td ${R}>${m.share}%</td></tr>`))),
+    box('Discounts Summary', table(['Type', '>Orders', '>Amount'], [
+      `<tr><td>Senior Citizen / PWD</td><td ${R}>${ds.seniorOrders || 0}</td><td ${R}>${fmt(ds.seniorAmount)}</td></tr>`,
+      `<tr><td>Regular / Promo</td><td ${R}>${Math.max(0, (ds.orders || 0) - (ds.seniorOrders || 0))}</td><td ${R}>${fmt(ds.manualAmount)}</td></tr>`,
+      `<tr class="fw-bold"><td>Total (${ds.rate || 0}% of gross)</td><td ${R}>${ds.orders || 0}</td><td ${R}>${fmt(ds.total)}</td></tr>`
+    ]))
+  ];
+  if ((d.deliveryPlatforms || []).length) panels.push(box('Delivery Platforms', table(['Platform', '>Orders', '>Sales', '>Share'], d.deliveryPlatforms.map(p => `<tr><td>${escapeHtml(p.name)}</td><td ${R}>${p.orders}</td><td ${R}>${fmt(p.sales)}</td><td ${R}>${p.share}%</td></tr>`))));
+  panels.push(box('Sales by Category', table(['Category', '>Qty', '>Gross', '>Share'], (d.categories || []).map(x => `<tr><td>${escapeHtml(x.name)}</td><td ${R}>${num(x.quantity)}</td><td ${R}>${fmt(x.sales)}</td><td ${R}>${x.share}%</td></tr>`))));
+  panels.push(box('Sales by Station', table(['Station', '>Qty', '>Gross', '>Share'], (d.stations || []).map(x => `<tr><td>${escapeHtml(x.name)}</td><td ${R}>${num(x.quantity)}</td><td ${R}>${fmt(x.sales)}</td><td ${R}>${x.share}%</td></tr>`))));
+  panels.push(box('Hourly Breakdown', table(['Hour', '>Orders', '>Sales'], (d.hourly || []).map(x => `<tr><td>${escapeHtml(x.label)}</td><td ${R}>${x.orders}</td><td ${R}>${fmt(x.sales)}</td></tr>`))));
+  panels.push(box('Sales by Waiter / Server', table(['Staff', '>Orders', '>Sales'], (d.waiters || []).map(x => `<tr><td>${escapeHtml(x.name)}</td><td ${R}>${x.orders}</td><td ${R}>${fmt(x.sales)}</td></tr>`))));
+  panels.push(box('Sales by Cashier', table(['Cashier', '>Orders', '>Sales'], (d.cashiers || []).map(x => `<tr><td>${escapeHtml(x.name)}</td><td ${R}>${x.orders}</td><td ${R}>${fmt(x.sales)}</td></tr>`))));
+  $('reportBreakdowns').innerHTML = `<div class="row g-2 mb-2">${panels.join('')}</div>`;
 
-  $('reportBreakdowns').innerHTML = `<div class="row g-3">
-    ${box('Payment Methods', table(['Method', '>Txns', '>Amount', '>Share'], pmRows))}
-    ${box('Delivery Platforms', table(['Platform', '>Orders', '>Sales', '>Share'], pfRows, 'No delivery orders'))}
-    ${box('Sales by Category (gross)', table(['Category', '>Qty', '>Sales', '>Share'], catRows))}
-    ${box('Sales by Station (gross)', table(['Station', '>Qty', '>Sales', '>Share'], stRows))}
-    ${box('Sales by Hour', table(['Hour', '>Orders', '>Sales', '>Avg'], hrRows))}
-    ${box('Waiter Performance', table(['Waiter', '>Orders', '>Sales'], wRows))}
-    ${box('Cashier Performance', table(['Cashier', '>Orders', '>Sales'], cRows))}
-  </div>`;
+  $('reportTopItems').innerHTML = table(['#', 'Item', '>Qty', '>Avg Price', '>Gross Sales', '>Share'], (d.topItems || []).map((i, idx) => `<tr><td>${idx + 1}</td><td>${escapeHtml(i.name)}</td><td ${R}>${num(i.quantity)}</td><td ${R}>${fmt(i.avgPrice)}</td><td ${R}>${fmt(i.sales)}</td><td ${R}>${i.share}%</td></tr>`), 'No items sold');
+  $('reportDaily').innerHTML = table(['Date', '>Orders', '>Items', '>Subtotal', '>Discount', '>Tax', '>Service', '>Net Sales'], (d.daily || []).map(x => `<tr><td>${escapeHtml(x.date)}</td><td ${R}>${x.orders}</td><td ${R}>${num(x.items)}</td><td ${R}>${fmt(x.subtotal)}</td><td ${R}>-${fmt(x.discount)}</td><td ${R}>${fmt(x.tax)}</td><td ${R}>${fmt(x.service)}</td><td ${R} class="fw-bold">${fmt(x.sales)}</td></tr>`), 'No daily sales');
 
-  // ---- Top items ----
-  $('reportTopItems').innerHTML = table(['Item', '>Qty', '>Avg Price', '>Gross Sales', '>Share'],
-    (d.topItems || []).map(i =>
-      `<tr><td>${escapeHtml(i.name)}</td><td ${R}>${num(i.quantity)}</td><td ${R}>${fmt(i.avgPrice)}</td><td ${R}>${fmt(i.sales)}</td><td ${R}>${i.share}%</td></tr>`));
-
-  // ---- Daily ----
-  const days = d.daily || [];
-  const dailyRows = days.map(x =>
-    `<tr><td>${escapeHtml(x.date)}</td><td ${R}>${x.orders}</td><td ${R}>${num(x.items)}</td><td ${R}>${fmt(x.subtotal)}</td>
-     <td class="text-end text-danger">-${fmt(x.discount)}</td><td ${R}>${fmt(x.tax)}</td><td ${R}>${fmt(x.service)}</td>
-     <td ${R}><strong>${fmt(x.sales)}</strong></td><td ${R}>${fmt(x.orders ? x.sales / x.orders : 0)}</td></tr>`);
-  if (days.length) {
-    dailyRows.push(`<tr class="fw-bold"><td>TOTAL</td><td ${R}>${num(cn.paid)}</td><td ${R}>${num(t.items)}</td><td ${R}>${fmt(t.subtotal)}</td>
-      <td ${R}>-${fmt(t.discount)}</td><td ${R}>${fmt(t.tax)}</td><td ${R}>${fmt(t.service)}</td><td ${R}>${fmt(t.sales)}</td><td ${R}>${fmt(d.averageOrderValue)}</td></tr>`);
-  }
-  $('reportDaily').innerHTML = table(['Date', '>Orders', '>Items', '>Subtotal', '>Discount', '>Tax', '>Service', '>Net Sales', '>Avg'], dailyRows);
-
-  // ---- Order details ----
-  const ordRows = (d.orders || []).map(o => `
-    <tr>
-      <td class="text-nowrap">${escapeHtml(o.date)}<div class="small text-muted">${escapeHtml(o.time)}</div></td>
-      <td><strong>${escapeHtml(o.orderNumber)}</strong><div class="small text-muted">${escapeHtml(o.table)}</div></td>
-      <td>${escapeHtml(o.customer)}<div class="small text-muted">${escapeHtml(o.waiter)} / ${escapeHtml(o.cashier)}</div></td>
-      <td class="small" style="min-width:200px;">${escapeHtml(o.itemsText)}</td>
-      <td class="small text-nowrap">${escapeHtml(o.method)}${o.reference ? '<div class="text-muted">Ref: ' + escapeHtml(o.reference) + '</div>' : ''}</td>
-      <td ${R}>${fmt(o.subtotal)}</td>
-      <td class="text-end text-danger text-nowrap">${o.discount > 0 ? '-' + fmt(o.discount) + '<div class="small text-muted">' + escapeHtml(o.discountReason) + '</div>' : '—'}</td>
-      <td ${R}>${fmt(o.tax)}</td>
-      <td ${R}>${fmt(o.service)}</td>
-      <td ${R}><strong>${fmt(o.total)}</strong></td>
-    </tr>`);
-  $('reportOrders').innerHTML =
-    `<div style="max-height:480px; overflow:auto;">${table(['Date / Time', 'Order / Table', 'Customer / Staff', 'Items', 'Payment', '>Subtotal', '>Discount', '>Tax', '>Service', '>Total'], ordRows, 'No paid orders in this period')}</div>` +
-    (d.ordersTruncated ? '<div class="small text-warning mt-1">Showing the latest 1,000 orders. Narrow the date range to see the rest.</div>' : '');
+  const truncNote = d.ordersTruncated ? `<div class="small text-warning mb-1">Showing the latest ${(d.orders || []).length} orders.</div>` : '';
+  $('reportOrders').innerHTML = truncNote + `<div style="max-height:420px; overflow:auto;">` + table(
+    ['Date', 'Time', 'Order #', 'Table', 'Customer', 'Waiter', 'Cashier', 'Payment', 'Ref #', 'Items', '>Subtotal', '>Discount', '>Tax', '>Service', '>Total'],
+    (d.orders || []).map(o => `<tr><td class="text-nowrap">${escapeHtml(o.date)}</td><td class="text-nowrap">${escapeHtml(o.time)}</td><td><strong>${escapeHtml(o.orderNumber)}</strong></td><td>${escapeHtml(o.table)}</td><td>${escapeHtml(o.customer)}</td><td>${escapeHtml(o.waiter)}</td><td>${escapeHtml(o.cashier)}</td><td class="text-nowrap">${escapeHtml(o.method)}</td><td class="small">${escapeHtml(o.reference || '—')}</td><td class="small">${escapeHtml(o.itemsText)}</td><td ${R}>${fmt(o.subtotal)}</td><td ${R}>-${fmt(o.discount)}</td><td ${R}>${fmt(o.tax)}</td><td ${R}>${fmt(o.service)}</td><td ${R} class="fw-bold">${fmt(o.total)}</td></tr>`), 'No paid orders'
+  ) + '</div>';
 }
 
 function exportSalesReportCsv() {
   const d = _lastSalesReport;
-  if (!d || !(d.orders || []).length) return toast('Generate a report with orders first.', 'warning');
-  const cols = [['Date', 'date'], ['Time', 'time'], ['Order #', 'orderNumber'], ['Table', 'table'], ['Customer', 'customer'],
-    ['Waiter', 'waiter'], ['Cashier', 'cashier'], ['Payment', 'method'], ['Reference', 'reference'], ['Items Qty', 'itemQty'],
-    ['Items', 'itemsText'], ['Subtotal', 'subtotal'], ['Discount', 'discount'], ['Discount Reason', 'discountReason'],
-    ['Senior/PWD ID', 'seniorPwdId'], ['Tax', 'tax'], ['Service Charge', 'service'], ['Total', 'total']];
-  const esc = v => { const s = String(v === undefined || v === null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-  const lines = [cols.map(x => esc(x[0])).join(',')].concat(d.orders.map(o => cols.map(x => esc(o[x[1]])).join(',')));
-  const link = document.createElement('a');
-  link.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent('\ufeff' + lines.join('\r\n'));
-  link.download = `sales_${(d.range && d.range.start) || 'all'}_${(d.range && d.range.end) || 'all'}.csv`;
-  document.body.appendChild(link); link.click(); document.body.removeChild(link);
-  toast('CSV export started.', 'success');
+  if (!d) return toast('Generate a sales report first.', 'warning');
+  const esc = v => { const s = String(v === undefined || v === null ? '' : v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const head = ['Date', 'Time', 'Order #', 'Table', 'Customer', 'Waiter', 'Cashier', 'Payment Method', 'Reference #', 'Item Qty', 'Items', 'Subtotal', 'Discount', 'Discount Reason', 'Senior/PWD ID', 'Tax', 'Service Charge', 'Total'];
+  const rows = (d.orders || []).map(o => [o.date, o.time, o.orderNumber, o.table, o.customer, o.waiter, o.cashier, o.method, o.reference, o.itemQty, o.itemsText, o.subtotal, o.discount, o.discountReason, o.seniorPwdId, o.tax, o.service, o.total].map(esc).join(','));
+  const csv = '\uFEFF' + [head.map(esc).join(',')].concat(rows).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `sales_report_${(d.range && d.range.start) || 'all'}_to_${(d.range && d.range.end) || 'today'}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
 
-/* ============================================================
-   END OF DAY & MAINTENANCE HANDLERS
-   ============================================================ */
 async function loadEODReport() {
   try {
-    showLoading('Generating detailed EOD report…');
-    const dateVal = $('eodDate').value || todayStr();
-    const r = await callServer('getEndOfDayReport', state.token, dateVal);
+    showLoading('Generating EOD report…');
+    const data = await callServer('getEndOfDayReport', state.token, $('eodDate').value || todayStr());
     hideLoading();
-    if (!r) throw new Error('Report returned no data. Please try again.');
-    window._lastEOD = r;
-    state.eodGenerated = { date: r.date, at: Date.now() };
-    renderEODReport(r);
-  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
-}
+    const c = data.currency || curr();
+    const fmt = (n) => c + Number(n || 0).toFixed(2);
+    const t = data.totals || {}, oc = data.orderCounts || {};
+    const payList = data.paymentSummary || [], txList = data.transactions || [], refList = data.referenceTransactions || [];
+    const delivList = data.deliverySummary || [], cashiers = data.cashierSummary || [], items = data.itemsSold || [], logins = data.loggedInUsers || [];
+    const discounts = data.discountDetails || [];
 
-function renderEODReport(r) {
-  const c = r.currency || '₱';
-  const fmt = (n) => c + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const methodRows = payList.map(m => `<tr><td><strong>${escapeHtml(m.label)}</strong></td><td class="text-center">${m.count}</td><td class="text-end">${fmt(m.amount)}</td></tr>`).join('');
+    const txRows = txList.length ? txList.map(tx => `<tr><td>${tx.no}</td><td class="text-nowrap">${escapeHtml(tx.timeLabel)}</td><td><strong>${escapeHtml(tx.orderNumber)}</strong></td><td>${escapeHtml(tx.tableNumber)}</td><td>${escapeHtml(tx.customer)}</td><td>${escapeHtml(tx.methodLabel || tx.method)}</td><td>${tx.reference ? `<code>${escapeHtml(tx.reference)}</code>` : '<span class="text-muted">—</span>'}</td><td>${escapeHtml(tx.cashier)}</td><td class="text-end">${fmt(tx.paid)}</td><td class="text-end">${fmt(tx.change)}</td><td class="text-end"><strong>${fmt(tx.due)}</strong></td></tr>`).join('') : '<tr><td colspan="11" class="text-center text-muted py-3">No payments recorded for this date.</td></tr>';
+    const refRows = refList.length ? refList.map(tx => `<tr><td>${escapeHtml(tx.timeLabel)}</td><td><strong>${escapeHtml(tx.orderNumber)}</strong></td><td>${escapeHtml(tx.methodLabel || tx.method)}</td><td>${tx.reference ? `<code>${escapeHtml(tx.reference)}</code>` : '<span class="badge bg-warning text-dark">MISSING</span>'}</td><td class="text-end">${fmt(tx.paid)}</td></tr>`).join('') : '<tr><td colspan="5" class="text-center text-muted py-2">No non-cash transactions.</td></tr>';
+    const discountRows = discounts.length ? discounts.map(d => `<tr><td class="text-nowrap">${escapeHtml(d.timeLabel)}</td><td><strong>${escapeHtml(d.orderNumber)}</strong></td><td>${escapeHtml(d.tableNumber)}</td><td>${escapeHtml(d.customer)}</td><td>${d.isSenior ? '<span class="badge bg-primary">Senior / PWD</span>' : '<span class="badge bg-secondary">Manual</span>'}</td><td>${d.idNumber ? `<code>${escapeHtml(d.idNumber)}</code>` : '<span class="text-muted">—</span>'}</td><td class="text-end">${d.percent ? d.percent + '%' : '—'}</td><td class="text-end text-danger">-${fmt(d.amount)}</td><td class="small text-muted">${escapeHtml(d.reason || '—')}</td></tr>`).join('') : '<tr><td colspan="9" class="text-center text-muted py-2">No discounts applied on this date.</td></tr>';
+    const cashierRows = cashiers.length ? cashiers.map(ca => `<tr><td>${escapeHtml(ca.name)}</td><td class="text-center">${ca.count}</td><td class="text-end">${fmt(ca.amount)}</td></tr>`).join('') : '<tr><td colspan="3" class="text-center text-muted py-2">No cashier activity.</td></tr>';
+    const itemRows = items.length ? items.map(it => `<tr><td>${escapeHtml(it.name)}</td><td class="text-center">${it.quantity}</td><td class="text-end">${fmt(it.unitPrice)}</td><td class="text-end"><strong>${fmt(it.total)}</strong></td></tr>`).join('') : '<tr><td colspan="4" class="text-center text-muted py-2">No items sold.</td></tr>';
+    const loginRows = logins.length ? logins.map(u => `<tr><td><strong>${escapeHtml(u.name)}</strong></td><td><span class="badge bg-secondary">${escapeHtml(u.role)}</span></td><td class="text-center">${u.logins}</td><td>${escapeHtml(u.firstLogin)}</td><td>${escapeHtml(u.lastLogin)}</td></tr>`).join('') : '<tr><td colspan="5" class="text-center text-muted py-2">No logins recorded.</td></tr>';
 
-  // ---- Payments collected by method ----
-  const deliveryList = Array.isArray(r.deliverySummary) ? r.deliverySummary : [];
-  const deliverySubRows = deliveryList.map(d => `
-    <div class="d-flex justify-content-between small py-1 border-bottom ps-3 text-muted">
-      <span>&#8627; ${escapeHtml(d.platform)} (${d.count} txn${d.count === 1 ? '' : 's'})</span>
-      <span>${fmt(d.amount)}</span>
-    </div>`).join('');
-  const paySummary = Array.isArray(r.paymentSummary) ? r.paymentSummary : [];
-  const totalCollected = Number(r.totalCollected || 0);
-  const payRows = paySummary.map(p => `
-    <div class="d-flex justify-content-between small py-1 border-bottom">
-      <span>${escapeHtml(p.label || p.method)} <span class="text-muted">(${p.count || 0} txn${(p.count || 0) === 1 ? '' : 's'})</span></span>
-      <strong>${fmt(p.amount)}</strong>
-    </div>${p.method === 'Delivery' ? deliverySubRows : ''}
-  `).join('') + `
-    <div class="d-flex justify-content-between small fw-bold pt-1">
-      <span>TOTAL PAID BY CUSTOMERS:</span><span>${fmt(totalCollected)}</span>
-    </div>`;
-
-  // ---- Collections per cashier ----
-  const cashiers = Array.isArray(r.cashierSummary) ? r.cashierSummary : [];
-  const cashierRows = cashiers.length ? cashiers.map(u => `
-    <div class="d-flex justify-content-between small py-1 border-bottom">
-      <span>${escapeHtml(u.name)} <span class="text-muted">(${u.count} txn${u.count === 1 ? '' : 's'})</span></span>
-      <strong>${fmt(u.amount)}</strong>
-    </div>`).join('') : '<div class="small text-muted">No transactions</div>';
-
-  // ---- All transactions ----
-  const txns = Array.isArray(r.transactions) ? r.transactions : [];
-  const txnRows = txns.length ? txns.map(t => {
-    const refOptional = t.method === 'Cash' || t.method === 'Delivery';
-    const refHtml = refOptional
-      ? (t.reference ? `<span class="text-dark">Ref #: <strong>${escapeHtml(t.reference)}</strong></span>` : '<span class="text-muted">Ref #: —</span>')
-      : (t.reference
-          ? `<span class="text-dark">Ref #: <strong>${escapeHtml(t.reference)}</strong></span>`
-          : '<span class="text-danger">Ref #: not provided</span>');
-    return `
-      <div class="border-bottom py-1 small">
-        <div class="d-flex justify-content-between">
-          <span>${t.no}. <strong>${escapeHtml(t.orderNumber || '—')}</strong> · ${escapeHtml(t.tableNumber || 'Takeout')}</span>
-          <strong>${fmt(t.amount)}</strong>
+    $('eodReport').innerHTML = `
+      <div id="eodPrintable" class="border rounded p-3 bg-white">
+        <div class="d-flex justify-content-between align-items-start border-bottom pb-2 mb-3 flex-wrap gap-2">
+          <div>
+            <h5 class="fw-bold mb-0">${escapeHtml(data.restaurantName || 'Restaurant POS')} — End of Day Report</h5>
+            <small class="text-muted">Report #: <strong>${escapeHtml(data.reportNo || '')}</strong> • Business Date: <strong>${escapeHtml(data.date)}</strong></small>
+          </div>
+          <div class="text-md-end small text-muted">
+            <div>Generated: ${escapeHtml(data.generatedLabel || '')}</div>
+            <div>By: <strong>${escapeHtml(data.generatedBy || '')}</strong></div>
+          </div>
         </div>
-        <div class="d-flex justify-content-between text-muted">
-          <span>${escapeHtml(t.timeLabel || '—')} · ${escapeHtml(t.customer || 'Walk-In Customer')}</span>
-          <span>${escapeHtml(t.methodLabel || t.method)}</span>
+        <div class="row g-2 mb-3">
+          <div class="col-6 col-md-3"><div class="border rounded p-2 bg-light"><div class="small text-muted">Total Sales</div><div class="fs-5 fw-bold text-success">${fmt(t.sales)}</div></div></div>
+          <div class="col-6 col-md-3"><div class="border rounded p-2 bg-light"><div class="small text-muted">Total Collected</div><div class="fs-5 fw-bold text-primary">${fmt(data.totalCollected)}</div></div></div>
+          <div class="col-6 col-md-3"><div class="border rounded p-2 bg-light"><div class="small text-muted">Paid Orders</div><div class="fs-5 fw-bold">${oc.paid || 0}</div></div></div>
+          <div class="col-6 col-md-3"><div class="border rounded p-2 bg-light"><div class="small text-muted">Avg Order Value</div><div class="fs-5 fw-bold">${fmt(t.averageOrder)}</div></div></div>
         </div>
-        <div class="d-flex justify-content-between text-muted">
-          <span>Cashier: ${escapeHtml(t.cashier || '—')}</span>
-          ${refHtml}
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <h6 class="fw-bold border-bottom pb-1">Sales Summary</h6>
+            <table class="table table-sm mb-0"><tbody>
+              <tr><td>Gross Subtotal</td><td class="text-end">${fmt(t.subtotal)}</td></tr>
+              ${Number(t.lessVat || 0) > 0 ? `<tr><td>Less: VAT-Exempt</td><td class="text-end text-danger">-${fmt(t.lessVat)}</td></tr>` : ''}
+              <tr><td>Discounts (${oc.discounted || 0} orders)</td><td class="text-end text-danger">-${fmt(t.discount)}</td></tr>
+              <tr><td>Service Charge</td><td class="text-end">${fmt(t.serviceCharge)}</td></tr>
+              ${Number(t.vatableSales || 0) > 0 ? `<tr><td>VATable Sales</td><td class="text-end">${fmt(t.vatableSales)}</td></tr>` : ''}
+              ${Number(t.vatExemptSales || 0) > 0 ? `<tr><td>VAT-Exempt Sales</td><td class="text-end">${fmt(t.vatExemptSales)}</td></tr>` : ''}
+              <tr><td>VAT / Tax</td><td class="text-end">${fmt(t.tax)}</td></tr>
+              <tr class="table-light fw-bold"><td>Net Sales</td><td class="text-end text-success">${fmt(t.sales)}</td></tr>
+              <tr><td>Total Change Given</td><td class="text-end">${fmt(data.totalChange)}</td></tr>
+              <tr class="fw-bold"><td>Net Cash/Payments Held</td><td class="text-end">${fmt(data.totalNet)}</td></tr>
+            </tbody></table>
+          </div>
+          <div class="col-md-6">
+            <h6 class="fw-bold border-bottom pb-1">Payments by Method</h6>
+            <table class="table table-sm mb-2">
+              <thead><tr><th>Method</th><th class="text-center">Count</th><th class="text-end">Amount</th></tr></thead>
+              <tbody>${methodRows}</tbody>
+              <tfoot><tr class="table-light fw-bold"><td>Total</td><td class="text-center">${txList.length}</td><td class="text-end">${fmt(data.totalCollected)}</td></tr></tfoot>
+            </table>
+            ${delivList.length ? `<h6 class="fw-bold border-bottom pb-1 mt-3">Delivery Platforms</h6><table class="table table-sm mb-0"><thead><tr><th>Platform</th><th class="text-center">Count</th><th class="text-end">Amount</th></tr></thead><tbody>${delivList.map(dl => `<tr><td>${escapeHtml(dl.platform)}</td><td class="text-center">${dl.count}</td><td class="text-end">${fmt(dl.amount)}</td></tr>`).join('')}</tbody></table>` : ''}
+          </div>
         </div>
-        <div class="d-flex justify-content-between text-muted">
-          <span>Customer Paid: <strong class="text-dark">${fmt(t.paid)}</strong></span>
-          <span>Order Total: ${fmt(t.due)} · Change: ${fmt(t.change)}</span>
+        <h6 class="fw-bold border-bottom pb-1 mt-3">All Payment Transactions (${txList.length})</h6>
+        <div class="table-responsive mb-3"><table class="table table-sm table-striped align-middle mb-0">
+          <thead><tr><th>#</th><th>Time</th><th>Order #</th><th>Table</th><th>Customer</th><th>Method</th><th>Ref #</th><th>Cashier</th><th class="text-end">Amount Paid</th><th class="text-end">Change</th><th class="text-end">Order Total</th></tr></thead>
+          <tbody>${txRows}</tbody>
+        </table></div>
+        <h6 class="fw-bold border-bottom pb-1 mt-3">Non-Cash Reference Numbers (${refList.length})</h6>
+        <div class="table-responsive mb-3"><table class="table table-sm align-middle mb-0">
+          <thead><tr><th>Time</th><th>Order #</th><th>Method</th><th>Reference #</th><th class="text-end">Amount</th></tr></thead>
+          <tbody>${refRows}</tbody>
+        </table></div>
+        <h6 class="fw-bold border-bottom pb-1 mt-3">Senior Citizen / PWD &amp; Discounted Orders (${discounts.length})</h6>
+        <div class="table-responsive mb-3"><table class="table table-sm align-middle mb-0">
+          <thead><tr><th>Time</th><th>Order #</th><th>Table</th><th>Customer</th><th>Type</th><th>ID #</th><th class="text-end">Rate</th><th class="text-end">Discount</th><th>Reason</th></tr></thead>
+          <tbody>${discountRows}</tbody>
+        </table></div>
+        <div class="row g-3 mb-3">
+          <div class="col-md-5"><h6 class="fw-bold border-bottom pb-1">Collections by Cashier</h6><table class="table table-sm mb-0"><thead><tr><th>Cashier</th><th class="text-center">Tx</th><th class="text-end">Collected</th></tr></thead><tbody>${cashierRows}</tbody></table></div>
+          <div class="col-md-7"><h6 class="fw-bold border-bottom pb-1">Logged-In Users (${logins.length})</h6><table class="table table-sm mb-0"><thead><tr><th>Name</th><th>Role</th><th class="text-center">Logins</th><th>First</th><th>Last</th></tr></thead><tbody>${loginRows}</tbody></table></div>
         </div>
+        <h6 class="fw-bold border-bottom pb-1 mt-3">Items Sold (${data.itemsTotalQty || 0} qty)</h6>
+        <div class="table-responsive"><table class="table table-sm mb-0">
+          <thead><tr><th>Item</th><th class="text-center">Qty</th><th class="text-end">Unit Price</th><th class="text-end">Total</th></tr></thead>
+          <tbody>${itemRows}</tbody>
+          <tfoot><tr class="table-light fw-bold"><td>Total</td><td class="text-center">${data.itemsTotalQty || 0}</td><td></td><td class="text-end">${fmt(data.itemsTotalAmount)}</td></tr></tfoot>
+        </table></div>
       </div>`;
-  }).join('') + `
-      <div class="d-flex justify-content-between small fw-bold pt-1">
-        <span>TOTAL PAID (${txns.length} transaction${txns.length === 1 ? '' : 's'}):</span><span>${fmt(totalCollected)}</span>
-      </div>` : '<div class="small text-muted">No transactions on this date</div>';
-
-  // ---- Card / GCash / Maya reference # ----
-  const refTxns = Array.isArray(r.referenceTransactions) ? r.referenceTransactions : [];
-  const refGroups = {};
-  refTxns.forEach(t => { (refGroups[t.method] = refGroups[t.method] || []).push(t); });
-  const refRows = Object.keys(refGroups).map(method => {
-    const list = refGroups[method];
-    const sub = list.reduce((s, t) => s + Number(t.amount || 0), 0);
-    return `
-      <div class="fw-semibold small mt-2 d-flex justify-content-between">
-        <span>${escapeHtml(list[0].methodLabel || method)} — ${list.length} txn${list.length === 1 ? '' : 's'}</span>
-        <span>${fmt(sub)}</span>
-      </div>
-      ${list.map(t => `
-        <div class="border-bottom py-1 small">
-          <div class="d-flex justify-content-between">
-            <span>${escapeHtml(t.timeLabel || '—')} · <strong>${escapeHtml(t.orderNumber || '—')}</strong></span>
-            <strong>${fmt(t.amount)}</strong>
-          </div>
-          <div class="d-flex justify-content-between text-muted">
-            <span>${escapeHtml(t.customer || '')}</span>
-            ${t.reference
-              ? `<span class="text-dark">Ref #: <strong>${escapeHtml(t.reference)}</strong></span>`
-              : '<span class="text-danger">Ref #: not provided</span>'}
-          </div>
-        </div>`).join('')}`;
-  }).join('');
-  const missingRef = Number(r.missingRefCount || 0);
-
-  // ---- Items sold: "2x Mango Float  ₱220.00 = ₱440.00" ----
-  const items = Array.isArray(r.itemsSold) ? r.itemsSold : [];
-  const itemRows = items.length ? items.map(i => `
-    <div class="d-flex justify-content-between small border-bottom py-1">
-      <span class="me-2">${i.quantity}x ${escapeHtml(i.name)}</span>
-      <span class="text-nowrap">${fmt(i.unitPrice)} = <strong>${fmt(i.total)}</strong></span>
-    </div>
-  `).join('') + `
-    <div class="d-flex justify-content-between small fw-bold pt-1">
-      <span>TOTAL ITEMS: ${r.itemsTotalQty || 0}</span><span>${fmt(r.itemsTotalAmount)}</span>
-    </div>` : '<div class="small text-muted">No items sold</div>';
-
-  // ---- Users logged in ----
-  const users = Array.isArray(r.loggedInUsers) ? r.loggedInUsers : [];
-  const userRows = users.length ? users.map(u => `
-    <div class="border-bottom py-1 small">
-      <div class="d-flex justify-content-between">
-        <span><strong>${escapeHtml(u.name)}</strong> <span class="text-muted">(${escapeHtml(u.role || '—')})</span></span>
-        <span class="text-muted">${u.logins} login${u.logins === 1 ? '' : 's'}</span>
-      </div>
-      <div class="d-flex justify-content-between text-muted">
-        <span>First: ${escapeHtml(u.firstLogin || '—')}</span>
-        <span>Last: ${escapeHtml(u.lastLogin || '—')}</span>
-      </div>
-    </div>`).join('') : '<div class="small text-muted">No login records for this date</div>';
-
-  // ---- Senior Citizen / PWD ID # & discount reason ----
-  const discounts = Array.isArray(r.discountDetails) ? r.discountDetails : [];
-  const discountRows = discounts.length ? discounts.map(d => `
-    <div class="border-bottom py-1 small">
-      <div class="d-flex justify-content-between">
-        <span><strong>${escapeHtml(d.orderNumber || '—')}</strong> · ${escapeHtml(d.tableNumber || 'Takeout')}</span>
-        <strong class="text-danger">-${fmt(d.amount)}</strong>
-      </div>
-      <div class="text-muted">${escapeHtml(d.timeLabel || '—')} · ${escapeHtml(d.customer || 'Walk-In Customer')}</div>
-      <div class="d-flex justify-content-between">
-        <span>${d.isSenior ? 'Senior Citizen / PWD ID #: <strong>' + escapeHtml(d.idNumber || 'not provided') + '</strong>' : 'Discount Type: <strong>Manual</strong>'}</span>
-        <span>Discount (%): <strong>${d.percent}%</strong></span>
-      </div>
-      <div class="text-muted">Reason: ${escapeHtml(d.reason || '—')}</div>
-    </div>`).join('') + `
-    <div class="d-flex justify-content-between small fw-bold pt-1">
-      <span>TOTAL DISCOUNTS (${discounts.length} order${discounts.length === 1 ? '' : 's'}):</span><span>-${fmt(r.discountTotal)}</span>
-    </div>` : '<div class="small text-muted">No discounts given on this date</div>';
-
-  const generated = r.generatedLabel || new Date(r.generatedAt).toLocaleString();
-  const o = r.orderCounts || {};
-
-  // ---- Notice when no data / recovered rows ----
-  const dg = r.diagnostics || {};
-  let noticeHtml = '';
-  if (!txns.length) {
-    noticeHtml = `<div class="alert alert-warning small py-2 mb-3">
-      <i class="fa-solid fa-triangle-exclamation me-1"></i>No transactions found for <strong>${escapeHtml(r.date)}</strong>
-      (scanned ${dg.ordersScanned || 0} orders, ${dg.paymentsScanned || 0} payments, timezone ${escapeHtml(dg.timezone || '')}).
-      ${(dg.availableDates || []).length ? '<br>Dates with data: <strong>' + dg.availableDates.map(escapeHtml).join(', ') + '</strong>' : ''}
-      ${dg.samplePayment ? '<br>Latest payment time read as: <strong>' + escapeHtml(dg.samplePayment.raw) + '</strong> → date <strong>' + escapeHtml(dg.samplePayment.key || 'invalid') + '</strong>, order found: <strong>' + (dg.samplePayment.orderFound ? 'yes' : 'no') + '</strong>' : ''}
-    </div>`;
-  } else if (dg.recoveredCount > 0) {
-    noticeHtml = `<div class="small text-muted mb-2">* ${dg.recoveredCount} transaction(s) recovered from order records (no payment row found).</div>`;
-  }
-
-  $('eodReport').innerHTML = `
-    <div class="border rounded p-4 bg-white shadow-sm mx-auto" id="eodPrintArea" style="max-width: 480px;">
-      <div class="text-center border-bottom pb-2 mb-3">
-        <h4 class="fw-bold mb-0">${escapeHtml(r.restaurantName || 'Restaurant POS')}</h4>
-        <div class="fw-semibold text-secondary">END OF DAY SALES REPORT</div>
-        <div class="small text-muted">Report No: <strong>${escapeHtml(r.reportNo || '')}</strong></div>
-        <div class="small text-muted">Business Date: <strong>${escapeHtml(r.date)}</strong></div>
-        <div class="small text-muted">Generated: ${escapeHtml(generated)} by ${escapeHtml(r.generatedBy)}</div>
-      </div>
-      ${noticeHtml}
-
-      <h6 class="fw-bold border-bottom pb-1 text-primary"><i class="fa-solid fa-chart-line me-1"></i>Sales Overview</h6>
-      <div class="d-flex justify-content-between small mb-1"><span>Gross Subtotal:</span><span>${fmt(r.totals?.subtotal)}</span></div>
-      ${Number(r.totals?.lessVat) > 0 ? `<div class="d-flex justify-content-between small mb-1 text-danger"><span>Less: VAT-Exempt (Senior/PWD):</span><span>-${fmt(r.totals?.lessVat)}</span></div>` : ''}
-      <div class="d-flex justify-content-between small mb-1 text-danger"><span>Total Discounts${o.discounted ? ' (' + o.discounted + ' order' + (o.discounted === 1 ? '' : 's') + ')' : ''}:</span><span>-${fmt(r.totals?.discount)}</span></div>
-      <div class="d-flex justify-content-between small mb-1"><span>Service Charges:</span><span>${fmt(r.totals?.serviceCharge)}</span></div>
-      <hr class="my-2">
-      <div class="d-flex justify-content-between fs-5 fw-bold text-success mb-2"><span>NET TOTAL SALES:</span><span>${fmt(r.totals?.sales)}</span></div>
-      <div class="small border rounded p-2 mb-3">
-        <div class="fw-semibold mb-1">VAT Breakdown</div>
-        <div class="d-flex justify-content-between"><span>VATable Sales</span><span>${fmt(r.totals?.vatableSales)}</span></div>
-        <div class="d-flex justify-content-between"><span>VAT Amount (12%)</span><span>${fmt(r.totals?.tax)}</span></div>
-        <div class="d-flex justify-content-between"><span>VAT-Exempt Sales (Senior/PWD)</span><span>${fmt(r.totals?.vatExemptSales)}</span></div>
-      </div>
-
-      <h6 class="fw-bold border-bottom pb-1 text-primary"><i class="fa-solid fa-receipt me-1"></i>Order Summary</h6>
-      <div class="d-flex justify-content-between small mb-1"><span>Total Paid Orders:</span><strong>${o.paid || 0}</strong></div>
-      <div class="d-flex justify-content-between small mb-1"><span>Cancelled / Voided Orders:</span><strong>${o.cancelled || 0}</strong></div>
-      <div class="d-flex justify-content-between small mb-1"><span>Open / Unpaid Orders:</span><strong>${o.open || 0}${(o.open || 0) > 0 ? ' (' + fmt(o.openValue) + ')' : ''}</strong></div>
-      <div class="d-flex justify-content-between small mb-1"><span>Average Order Value:</span><strong>${fmt(r.totals?.averageOrder)}</strong></div>
-
-      <h6 class="fw-bold border-bottom pb-1 mt-3 text-primary"><i class="fa-solid fa-wallet me-1"></i>Payments Collected</h6>
-      ${payRows}
-      <div class="d-flex justify-content-between small text-muted mt-1"><span>Less Change Given:</span><span>-${fmt(r.totalChange)}</span></div>
-      <div class="d-flex justify-content-between small fw-bold"><span>NET COLLECTED:</span><span>${fmt(r.totalNet)}</span></div>
-
-      <h6 class="fw-bold border-bottom pb-1 mt-3 text-primary"><i class="fa-solid fa-cash-register me-1"></i>Collections by Cashier</h6>
-      ${cashierRows}
-
-      <h6 class="fw-bold border-bottom pb-1 mt-3 text-primary"><i class="fa-solid fa-list-ol me-1"></i>All Transactions</h6>
-      ${txnRows}
-
-      <h6 class="fw-bold border-bottom pb-1 mt-3 text-primary"><i class="fa-solid fa-hashtag me-1"></i>Card / GCash / Maya Reference #</h6>
-      ${refRows || '<div class="small text-muted">No card or e-wallet transactions</div>'}
-      ${missingRef > 0 ? `<div class="small text-danger mt-2"><i class="fa-solid fa-triangle-exclamation me-1"></i>${missingRef} non-cash transaction(s) have no reference number.</div>` : ''}
-
-      <h6 class="fw-bold border-bottom pb-1 mt-3 text-primary"><i class="fa-solid fa-id-card me-1"></i>Senior Citizen / PWD ID # &amp; Discount Reason</h6>
-      ${discountRows}
-
-      <h6 class="fw-bold border-bottom pb-1 mt-3 text-primary"><i class="fa-solid fa-utensils me-1"></i>Items Sold Breakdown</h6>
-      <div class="mb-3" style="max-height:220px; overflow-y:auto;">${itemRows}</div>
-
-      <h6 class="fw-bold border-bottom pb-1 mt-3 text-primary"><i class="fa-solid fa-users me-1"></i>Users Logged In Today</h6>
-      ${userRows}
-
-      <div class="border-top pt-2 text-center text-muted small mt-3">*** END OF REPORT ***</div>
-    </div>
-  `;
+    state.eodGenerated = { date: data.date, at: Date.now() };
+  } catch (e) { hideLoading(); toast(e.message, 'danger'); }
 }
 
 function printEODReport() {
-  const area = document.getElementById('eodPrintArea');
-  if (!area) return toast('Please generate the report first.', 'warning');
-  
-  const w = window.open('', '_blank', 'width=450,height=700');
-  if (!w) return toast('Pop-up blocked. Allow pop-ups to print.', 'warning');
-  w.document.write(`
-    <html>
-      <head>
-        <title>EOD Sales Report</title>
-        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-        <style>
-          body { font-family: 'Courier New', Courier, monospace; font-size: 13px; padding: 15px; background: #fff; color: #000; }
-          #eodPrintArea { border: none !important; box-shadow: none !important; padding: 0 !important; max-width: 100% !important; }
-          hr { border-top: 1px dashed #000; opacity: 1; }
-          #eodPrintArea [style*="max-height"] { max-height: none !important; overflow: visible !important; }
-        </style>
-      </head>
-      <body onload="window.print(); window.close();">${area.outerHTML}</body>
-    </html>
-  `);
-  w.document.close();
+  const el = $('eodPrintable');
+  if (!el) return toast('Generate the End of Day report first.', 'warning');
+  const win = window.open('', '_blank', 'width=900,height=700');
+  if (!win) return toast('Pop-up blocked. Please allow pop-ups to print.', 'warning');
+  win.document.write(`<!DOCTYPE html><html><head><title>End of Day Report</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>body{font-size:12px;padding:16px;color:#000;} table{font-size:11px;} code{color:#000;background:#f1f5f9;padding:1px 4px;border-radius:3px;} @media print{@page{margin:10mm;}}</style>
+    </head><body onload="setTimeout(function(){window.print();window.close();},250);">${el.outerHTML}</body></html>`);
+  win.document.close();
 }
 
+/* ============================================================
+   END OF DAY, BACKUP RESTORE, PRUNE & ZIP EXPORT
+   ============================================================ */
 async function closePOS() {
-  if (state.queue.length > 0) {
-    return toast(`Sync ${state.queue.length} pending offline change(s) before closing the POS.`, 'warning');
-  }
-  const dateVal = $('eodDate').value || todayStr();
-
-  // Require the EOD report to be generated for this date first
-  if (!state.eodGenerated || state.eodGenerated.date !== dateVal) {
-    showModal('eodRequiredModal');
-    return;
-  }
-
-  if (!confirm(`Are you sure you want to close the POS for ${dateVal}?\n\nThis will:\n1. Generate a backup copy in Google Drive.\n2. Clear daily sales, orders, and reports.\n3. Reset all tables to Available.`)) return;
+  if (state.queue.length > 0) return toast('You have offline changes waiting to sync. Please wait until Synced before closing POS.', 'warning');
+  const dateStr = $('eodDate').value || todayStr();
+  if (!state.eodGenerated || state.eodGenerated.date !== dateStr) return showModal('eodRequiredModal');
+  if (!confirm(`Are you sure you want to close POS for ${dateStr}?\n\n• A JSON backup file will download automatically\n• All orders, items, and payments will be cleared\n• All tables will reset to Available`)) return;
 
   try {
-    showLoading('Backing up database and clearing daily POS sales…');
-    const res = await callServerT(180000, 'archiveAndResetPOS', state.token, dateVal);
-
-    showDone(res.message, async () => {
+    showLoading('Backing up and closing POS…');
+    const res = await callServer('archiveAndResetPOS', state.token, dateStr);
+    showDone('POS closed & reset!', () => {
       state.eodGenerated = null;
-      $('eodReport').innerHTML = `<div class="alert alert-info text-center mt-3"><i class="fa-solid fa-circle-check me-2"></i>POS successfully closed and archived for ${escapeHtml(dateVal)}. Backup copy saved in Google Drive.</div>`;
+      toast(res.message, 'success');
+      $('eodReport').innerHTML = `<div class="alert alert-success">✅ ${escapeHtml(res.message)}</div>`;
       clearSalesReportUI();
-
-      state.orders = []; state.stats = { pending: 0, kitchen: 0, ready: 0, served: 0 }; state.localPayments = {};
-      
-      await loadAdminStats(); await poll(true);
-      toast('POS sales cleared and backup successfully created in Drive!', 'success');
+      poll(); loadAdminStats();
     });
-  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
+  } catch (e) { hideLoading(); toast(e.message, 'danger'); }
 }
 
-async function loadDriveBackupsList() {
-  try {
-    showLoading('Scanning Google Drive for backups…');
-    const backups = await callServer('listDriveBackups', state.token);
-    hideLoading();
+function restoreSelectedBackup() {
+  const fileInput = $('backupFileInput');
+  if (!fileInput || !fileInput.files || !fileInput.files[0]) return toast('Please choose a JSON backup file first.', 'warning');
+  if (!confirm('⚠️ WARNING: Restoring a backup will OVERWRITE all current active Orders, OrderItems, and Payments.\n\nProceed?')) return;
 
-    const sel = $('backupSelect');
-    const list = Array.isArray(backups) ? backups : [];
-    if (list.length === 0) {
-      sel.innerHTML = '<option value="">No POS backup files found in Drive</option>';
-      toast('No backup files found in Drive folder.', 'warning');
-      return;
-    }
-
-    sel.innerHTML = list.map(b => 
-      `<option value="${escapeHtml(b.fileId)}">${escapeHtml(b.fileName)} (${new Date(b.createdAt).toLocaleString()})</option>`
-    ).join('');
-
-    toast(`Found ${list.length} backup file(s).`, 'success');
-  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
-}
-
-async function restoreSelectedBackup() {
-  const fileId = $('backupSelect').value;
-  if (!fileId) return toast('Please select a backup file first.', 'warning');
-  const selText = $('backupSelect').options[$('backupSelect').selectedIndex].text;
-
-  if (!confirm(`WARNING: Restoring will overwrite current active orders with backup data from:\n\n"${selText}"\n\nProceed?`)) return;
-
-  try {
-    showLoading('Restoring POS database from Google Drive backup…');
-    const res = await callServerT(180000, 'restorePOSFromBackup', state.token, fileId);
-
-    showDone(res.message, async () => {
-      await loadAdminStats(); await poll(true);
-      toast('Database restoration complete!', 'success');
-    });
-  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
+  const reader = new FileReader();
+  reader.onload = async (ev) => {
+    try {
+      const backupObj = JSON.parse(ev.target.result);
+      showLoading('Restoring data from backup file…');
+      const res = await callServer('restorePOSFromBackup', state.token, backupObj);
+      showDone('Restore Complete!', () => { toast(res.message, 'success'); poll(); loadAdminStats(); });
+    } catch (e) { hideLoading(); toast(e.message, 'danger'); }
+  };
+  reader.readAsText(fileInput.files[0]);
 }
 
 async function triggerManualPrune() {
-  if (!confirm('Search Google Drive and delete backup files older than 30 days?')) return;
-
+  if (!confirm('Delete expired sessions and activity logs older than 30 days?')) return;
   try {
-    showLoading('Scanning Google Drive and pruning old backups…');
+    showLoading('Pruning old records…');
     const res = await callServer('pruneOldPOSBackups', state.token);
-    showDone(`Pruned ${res.deletedCount || 0} old backup(s)!`, () => {
-      toast(`Moved ${res.deletedCount || 0} old file(s) to Drive trash.`, 'success');
-      loadDriveBackupsList();
-    });
-  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
+    showDone('Cleanup complete!', () => toast(`Pruned ${res.deletedCount} old log record(s).`, 'success'));
+  } catch (e) { hideLoading(); toast(e.message, 'danger'); }
 }
 
 async function downloadZipBackup() {
   try {
-    showLoading('Converting sheets to CSV and compressing ZIP archive…');
+    showLoading('Generating CSV ZIP archive…');
     const res = await callServer('exportDatabaseAsZip', state.token);
-
+    const byteCharacters = atob(res.base64Data);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
+    const blob = new Blob([new Uint8Array(byteNumbers)], { type: 'application/zip' });
     const link = document.createElement('a');
-    link.href = 'data:application/zip;base64,' + res.base64Data;
-    link.download = res.fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    showDone('ZIP download started!', () => { toast(`Downloaded "${res.fileName}"`, 'success'); });
-  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
-}
-
-function openHelpModal() { showModal('helpModal'); }
-
-function printSystemHelpGuide() {
-  const restaurantName = state.settings.RESTAURANT_NAME || 'Restaurant POS';
-  const generatedAt = new Date().toLocaleString();
-  const seniorPctText = getSeniorPct();
-
-  const printWindow = window.open('', '_blank', 'width=400,height=700');
-  if (!printWindow) return toast('Pop-up blocked. Allow pop-ups to print.', 'warning');
-  
-  printWindow.document.write(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>POS Quick Operations Guide (Thermal 80mm)</title>
-        <style>
-          @page { size: 80mm auto; margin: 0; }
-          body {
-            font-family: 'Courier New', Courier, monospace, system-ui;
-            font-size: 11px; line-height: 1.3; width: 72mm; margin: 0 auto;
-            padding: 5mm 2mm; color: #000; background: #fff;
-          }
-          .text-center { text-align: center; }
-          .fw-bold { font-weight: bold; }
-          .title { font-size: 13px; text-transform: uppercase; }
-          .divider { border-bottom: 1px dashed #000; margin: 6px 0; }
-          .double-divider { border-bottom: 2px solid #000; margin: 6px 0; }
-          .section-header {
-            font-size: 11px; font-weight: bold; text-transform: uppercase;
-            background: #000; color: #fff; padding: 2px 4px; margin: 8px 0 4px 0;
-            display: inline-block; width: 100%; box-sizing: border-box;
-          }
-          ol, ul { padding-left: 14px; margin: 4px 0; }
-          li { margin-bottom: 4px; }
-          .footer { font-size: 9px; margin-top: 10px; }
-          @media print { body { width: 72mm; } }
-        </style>
-      </head>
-      <body onload="window.print(); window.close();">
-        <div class="text-center">
-          <div class="title fw-bold">${escapeHtml(restaurantName)}</div>
-          <div class="fw-bold">OPERATIONS QUICK MANUAL</div>
-          <div style="font-size: 9px;">80mm Thermal Reference</div>
-        </div>
-
-        <div class="double-divider"></div>
-
-        <div style="font-size: 9px;" class="text-center">
-          Date: ${generatedAt}<br>
-          System Version: ${APP_VERSION}
-        </div>
-
-        <div class="divider"></div>
-
-        <div class="section-header">0. ROLES</div>
-        <ul>
-          <li><span class="fw-bold">Waiter:</span> Dashboard.</li>
-          <li><span class="fw-bold">Counter:</span> Counter + Dashboard.</li>
-          <li><span class="fw-bold">Kitchen:</span> Kitchen (KDS).</li>
-          <li><span class="fw-bold">Admin:</span> All + Admin Setting.</li>
-        </ul>
-
-        <div class="section-header">1. DASHBOARD</div>
-        <ol>
-          <li><span class="fw-bold">New Order:</span> [+ New Order], pick table (blank = Takeout), tap items, [Submit Order].</li>
-          <li><span class="fw-bold">View:</span> [Grid] / [List] switches Active Orders layout.</li>
-          <li><span class="fw-bold">Tables:</span> Tap Available = reserve (enter guest name). Tap Reserved = edit name, clear, or transfer to another table. Tap Needs Cleaning = mark clean. Tap in-use = free table.</li>
-          <li><span class="fw-bold">Serve:</span> [Serve] appears when order is READY.</li>
-          <li><span class="fw-bold">Transfer:</span> Move an open order to an Available table.</li>
-          <li><span class="fw-bold">Merge:</span> [Merge Tables] combines source into target order.</li>
-          <li>READY alert pops up with a chime - acknowledge then serve.</li>
-        </ol>
-
-        <div class="section-header">2. COUNTER &amp; BILLING</div>
-        <ol>
-          <li><span class="fw-bold">View:</span> [Grid] / [List] button switches the ticket layout.</li>
-          <li><span class="fw-bold">Pay &amp; Confirm:</span> Customer name, Senior/PWD ${seniorPctText}% (ID # required) or manual discount (max 50%), Delivery option, amount received, method, ref #.</li>
-          <li>PH VAT: prices include 12% VAT. Senior/PWD = remove VAT first, then ${seniorPctText}% off, VAT-exempt.</li>
-          <li><span class="fw-bold">Confirm Payment:</span> Prints receipt and releases ticket to Kitchen.</li>
-          <li><span class="fw-bold">Reject:</span> Cancels unpaid order (reason required).</li>
-          <li><span class="fw-bold">Kitchen Ticket / Reprint Receipt:</span> Available on every card.</li>
-          <li><span class="fw-bold">Printer type:</span> choose Thermal 80mm or Standard A4/Letter in the print preview.</li>
-        </ol>
-
-        <div class="section-header">3. KITCHEN (KDS)</div>
-        <ol>
-          <li><span class="fw-bold">Accept Order</span> when chime sounds.</li>
-          <li><span class="fw-bold">Start Prep:</span> Enter minutes, tap [Start Prep]. ETA turns red when LATE.</li>
-          <li><span class="fw-bold">Mark Ready</span> when cooked.</li>
-          <li>If KDS is disabled, use printed kitchen tickets.</li>
-        </ol>
-
-        <div class="section-header">4. ADMIN SETTING</div>
-        <ol>
-          <li><span class="fw-bold">Settings:</span> Name, tax, service, Senior/PWD %, currency, timezone, footer, KDS switch. [Save Settings].</li>
-          <li><span class="fw-bold">Menu / Tables / Categories / Users:</span> Add and edit records. Default user password is 123456.</li>
-          <li><span class="fw-bold">Activity Log:</span> Last 300 actions.</li>
-        </ol>
-
-        <div class="section-header">5. REPORTS &amp; END OF DAY</div>
-        <ol>
-          <li><span class="fw-bold">Sales Report:</span> Choose dates, [Generate]. Totals, payments, categories, hours, staff, top items, daily, order details. [Export CSV].</li>
-          <li><span class="fw-bold">End of Day:</span> [Generate Report], [Print], then [Close POS for the Day].</li>
-          <li>Close = Drive backup, clear orders/payments, reset tables.</li>
-          <li><span class="fw-bold">Restore / Prune / ZIP:</span> In End of Day &amp; Maintenance.</li>
-          <li>Automatic backup runs every midnight once the trigger is installed.</li>
-        </ol>
-
-        <div class="section-header">6. OFFLINE &amp; TIPS</div>
-        <ol>
-          <li>Offline changes are saved on the device and sync automatically.</li>
-          <li>Do not log out with unsynced changes.</li>
-          <li>Allow pop-ups to print.</li>
-          <li>Session lasts 12 hours. 5 wrong logins = short lock.</li>
-          <li>Change the default admin password.</li>
-        </ol>
-
-        <div class="double-divider"></div>
-
-        <div class="text-center footer">
-          *** END OF QUICK MANUAL ***
-        </div>
-      </body>
-    </html>
-  `);
-  printWindow.document.close();
-}
-
-function openChangePasswordModal() {
-  $('cpOldPw').value = ''; $('cpNewPw').value = ''; $('cpNewPw2').value = '';
-  showModal('changePwModal');
-}
-
-async function submitChangePassword() {
-  const oldPw = $('cpOldPw').value, newPw = $('cpNewPw').value, newPw2 = $('cpNewPw2').value;
-  if (newPw !== newPw2) return toast('New passwords do not match', 'danger');
-  try {
-    showLoading('Updating…');
-    await callServer('changePassword', state.token, oldPw, newPw);
-    showDone('Password updated!', () => hideModal('changePwModal'));
-  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
+    link.href = URL.createObjectURL(blob); link.download = res.fileName;
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    showDone('ZIP Downloaded!', () => toast(`Downloaded ${res.fileName}`, 'success'));
+  } catch (e) { hideLoading(); toast(e.message, 'danger'); }
 }
 
 async function triggerDbSetup() {
-  if (!confirm('Re-initialize database?')) return;
+  if (!confirm('Verify Supabase database connection?')) return;
   try {
-    showLoading('Initializing database…');
-    await callServerT(120000, 'setupDatabase', state.token);
-    showDone('Database initialized!', () => { loadBootstrap(); poll(true); });
-  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
+    showLoading('Verifying database…');
+    const res = await callServer('setupDatabase', state.token);
+    showDone('Database ready!', () => { toast(res.message, 'success'); loadBootstrap(); });
+  } catch (e) { hideLoading(); toast(e.message, 'danger'); }
+}
+
+function openHelpModal() { showModal('helpModal'); }
+function printSystemHelpGuide() {
+  const el = $('helpModal');
+  if (!el) return;
+  const win = window.open('', '_blank', 'width=350,height=650');
+  if (!win) return toast('Pop-up blocked.', 'warning');
+  win.document.write(`<!DOCTYPE html><html><head><title>Operations Guide</title><style>body{font-family:monospace;font-size:12px;width:280px;padding:10px;}</style></head><body onload="window.print();window.close();">${el.querySelector('.modal-body').innerText.replace(/\n/g, '<br>')}</body></html>`);
+  win.document.close();
+}
+
+function openChangePasswordModal() { $('cpOldPw').value = ''; $('cpNewPw').value = ''; $('cpNewPw2').value = ''; showModal('changePwModal'); }
+async function submitChangePassword() {
+  const oldPw = $('cpOldPw').value, newPw = $('cpNewPw').value, newPw2 = $('cpNewPw2').value;
+  if (newPw !== newPw2) return toast('Passwords do not match.', 'warning');
+  try {
+    showLoading('Updating password…');
+    await callServer('changePassword', state.token, oldPw, newPw);
+    showDone('Password changed!', () => hideModal('changePwModal'));
+  } catch (e) { hideLoading(); toast(e.message, 'danger'); }
 }
 
 /* ============================================================
-   APPLICATION BOOTSTRAP
+   BOOT
    ============================================================ */
-window.addEventListener('load', async () => {
+window.addEventListener('DOMContentLoaded', async () => {
   $('loginVersion').textContent = APP_VERSION;
-  syncPrintModeSelects();
-  const resumed = await resumeSession();
-  if (resumed) initSession();
+  if (await resumeSession()) { initSession(); return; }
+  lsDel('pos_auth');
+  $('loginScreen').style.display = 'flex';
 });
 </script>
 </body>
