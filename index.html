@@ -1,116 +1,97 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#1e293b">
-<title>Restaurant Management System</title>
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<!-- Optional git-ignored config.js for private deployments (fails silently if absent) -->
-<script src="config.js" onerror="window.__NO_EXTERNAL_CONFIG=true"></script>
-<style>
-  :root {
-    --primary-color: #1e293b;
-    --accent-color: #f59e0b;
-    --bg-light: #f1f5f9;
-    --card-shadow: 0 4px 12px rgba(0,0,0,0.08);
-    --success-color: #10b981;
-    --danger-color: #ef4444;
-  }
-  body { 
-    background: var(--bg-light); 
-    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; 
-    overflow-x: hidden;
-  }
-  .navbar-brand { font-weight: 700; color: var(--accent-color) !important; }
-  .sidebar { background: var(--primary-color); color: #fff; min-height: calc(100vh - 56px); padding: 1rem 0; }
-  .sidebar .nav-link, .mobile-bottom-nav .nav-link {
-    color: #cbd5e1; padding: 12px 20px; margin: 2px 8px;
-    border-radius: 8px; display: flex; align-items: center; gap: 10px;
-    transition: background 0.15s;
-  }
-  .sidebar .nav-link:hover, .sidebar .nav-link.active,
-  .mobile-bottom-nav .nav-link.active { background: var(--accent-color); color: #fff; }
-  
-  .mobile-bottom-nav {
-    position: fixed; bottom: 0; left: 0; right: 0; background: var(--primary-color);
-    z-index: 1040; box-shadow: 0 -2px 10px rgba(0,0,0,0.15); display: flex;
-    justify-content: space-around; padding: 6px 0 calc(6px + env(safe-area-inset-bottom));
-  }
-  .mobile-bottom-nav .nav-link {
-    flex-direction: column; gap: 2px; padding: 6px 12px; margin: 0;
-    font-size: 0.72rem; text-align: center; border-radius: 6px;
-  }
-  .mobile-bottom-nav .nav-link i { font-size: 1.1rem; }
-
-  .card-pos {
-    border: none; border-radius: 12px; box-shadow: var(--card-shadow);
-    transition: transform 0.15s, box-shadow 0.15s;
-  }
-  .card-pos:hover { transform: translateY(-2px); box-shadow: 0 8px 16px rgba(0,0,0,0.12); }
-  .table-card { cursor: pointer; border-top: 5px solid var(--success-color); }
-  .kds-card { border-left: 6px solid #3b82f6; }
-  .kds-card.READY { border-left-color: var(--success-color); }
-  .sync-indicator { font-size: 0.8rem; color: #94a3b8; }
-  #loadingOverlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.88);
-    z-index: 9999; display: none; flex-direction: column;
-    align-items: center; justify-content: center; color: #fff;
-  }
-  .done-checkmark {
-    font-size: 4rem; color: var(--success-color);
-    animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  }
-  @keyframes popIn { 0% { transform: scale(0); } 100% { transform: scale(1); } }
-  .toast-container { position: fixed; top: 20px; right: 20px; z-index: 11000; }
-  .badge-status {
-    font-size: 0.72rem; padding: 0.35em 0.6em; border-radius: 6px;
-    text-transform: uppercase; letter-spacing: 0.5px;
-  }
-  .eta-countdown { font-variant-numeric: tabular-nums; }
-  .eta-countdown.late { color: var(--danger-color); font-weight: 700; }
-  .login-bg {
-    min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    background: linear-gradient(135deg, #1e293b 0%, #334155 100%); padding: 1rem;
-  }
-  .stat-card { padding: 1.25rem; border-radius: 12px; color: #fff; }
-  .stat-card h6 { opacity: 0.85; margin-bottom: 0.5rem; }
-  .stat-card h3, .stat-card h4 { font-weight: 800; margin: 0; }
-  .offline-banner {
-    position: fixed; bottom: 0; left: 0; right: 0; background: #dc2626;
-    color: #fff; text-align: center; padding: 8px; z-index: 10500;
-    display: none; font-size: 0.85rem;
-  }
-  .nav-section-title {
-    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px;
-    color: #64748b; padding: 12px 20px 4px;
-  }
-  .receipt-preview {
-    font-family: 'Courier New', Courier, monospace;
-    max-width: 340px; margin: 0 auto; padding: 15px;
-    border: 1px dashed #ccc; background: #fff; color: #000;
-  }
-  .img-preview-thumb {
-    width: 48px; height: 48px; object-fit: cover;
-    border-radius: 8px; border: 1px solid #cbd5e1; background: #e2e8f0;
-  }
-  .category-tabs-container::-webkit-scrollbar { display: none; }
-  .category-tabs-container { -ms-overflow-style: none; scrollbar-width: none; }
-
-  @media (max-width: 767.98px) {
-    .main-content-area { padding-bottom: 70px !important; }
-    .modal-dialog { margin: 0.5rem; }
-  }
-
-  button, .btn, .nav-link, .card-pos, .table-card { 
-    touch-action: manipulation; -webkit-tap-highlight-color: transparent; 
-  }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Restaurant Management System</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Optional git-ignored config.js for pre-configuring Supabase URL & Anon Key -->
+  <script src="config.js" onerror="window.POS_CONFIG = window.POS_CONFIG || {};"></script>
+  <style>
+    body { background-color: #f1f5f9; font-family: system-ui, -apple-system, sans-serif; }
+    .login-bg {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 1rem;
+    }
+    .sidebar {
+      min-height: calc(100vh - 56px); background: #0f172a; color: #cbd5e1; padding-top: 10px;
+    }
+    .sidebar .nav-link {
+      color: #cbd5e1; padding: 12px 20px; border-radius: 8px; margin: 2px 10px; font-weight: 500;
+    }
+    .sidebar .nav-link:hover, .sidebar .nav-link.active {
+      background: #1e293b; color: #f59e0b;
+    }
+    .sidebar .nav-link i { width: 22px; }
+    .mobile-bottom-nav {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 1030;
+      background: #0f172a; display: flex; justify-content: space-around;
+      padding: 6px 0; border-top: 1px solid #334155;
+    }
+    .mobile-bottom-nav .nav-link {
+      color: #94a3b8; font-size: 0.72rem; text-align: center;
+      display: flex; flex-direction: column; align-items: center; padding: 4px 8px;
+    }
+    .mobile-bottom-nav .nav-link.active { color: #f59e0b; font-weight: 700; }
+    .mobile-bottom-nav .nav-link i { font-size: 1.15rem; margin-bottom: 2px; }
+    .card-pos {
+      border: none; border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+      transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+    .table-card {
+      border-top: 5px solid #22c55e; cursor: pointer;
+    }
+    .table-card:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(15, 23, 42, 0.1); }
+    .stat-card {
+      border-radius: 12px; padding: 14px 16px; color: #fff;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    }
+    .stat-card h6 { font-size: 0.75rem; text-transform: uppercase; opacity: 0.9; margin-bottom: 4px; }
+    .stat-card h3, .stat-card h4 { font-weight: 700; margin-bottom: 0; }
+    .kds-card.CONFIRMED_BY_COUNTER { border-left: 6px solid #f59e0b; }
+    .kds-card.ACCEPTED_BY_KITCHEN { border-left: 6px solid #0dcaf0; }
+    .kds-card.PREPARING { border-left: 6px solid #0d6efd; }
+    .eta-countdown { font-weight: 700; color: #0d6efd; }
+    .eta-countdown.late { color: #dc3545; animation: pulse 1s infinite; }
+    @keyframes pulse { 50% { opacity: 0.5; } }
+    #loadingOverlay {
+      position: fixed; inset: 0; background: rgba(15, 23, 42, 0.78);
+      z-index: 2000; display: none; flex-direction: column;
+      align-items: center; justify-content: center; color: #fff;
+    }
+    .done-checkmark { font-size: 3.2rem; color: #22c55e; }
+    .toast-container { position: fixed; top: 68px; right: 16px; z-index: 2100; }
+    .offline-banner {
+      display: none; background: #dc2626; color: #fff;
+      text-align: center; padding: 6px; font-weight: 600; font-size: 0.85rem;
+    }
+    .sync-indicator { font-size: 0.78rem; color: #cbd5e1; }
+    .nav-section-title {
+      font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px;
+      color: #64748b; padding: 12px 20px 4px;
+    }
+    .receipt-preview {
+      font-family: 'Courier New', Courier, monospace;
+      max-width: 340px; margin: 0 auto; padding: 15px;
+      border: 1px dashed #ccc; background: #fff; color: #000;
+    }
+    .img-preview-thumb {
+      width: 48px; height: 48px; object-fit: cover;
+      border-radius: 8px; border: 1px solid #cbd5e1; background: #e2e8f0;
+    }
+    .category-tabs-container::-webkit-scrollbar { display: none; }
+    .category-tabs-container { -ms-overflow-style: none; scrollbar-width: none; }
+    @media (max-width: 767.98px) {
+      .main-content-area { padding-bottom: 70px !important; }
+      .modal-dialog { margin: 0.5rem; }
+    }
+    button, .btn, .nav-link, .card-pos, .table-card {
+      touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    }
+  </style>
 </head>
 <body>
 
@@ -160,7 +141,7 @@
       <div class="ms-auto d-flex align-items-center gap-2 gap-md-3 text-light">
         <div id="branchSwitcherWrap" class="d-flex align-items-center gap-1"></div>
         <span class="sync-indicator d-none d-sm-inline" id="syncStatus"><i class="fa-solid fa-bolt text-warning me-1"></i>Connecting Realtime…</span>
-        
+
         <button class="btn btn-outline-warning btn-sm fw-bold" onclick="openHelpModal()">
           <i class="fa-solid fa-circle-question me-1"></i><span class="d-none d-sm-inline">Help &amp; Guide</span>
         </button>
@@ -302,7 +283,6 @@
                       <label class="form-label small fw-semibold">Restaurant Name</label>
                       <input class="form-control" id="cfgRestaurantName" required>
                     </div>
-
                     <div class="col-md-3">
                       <label class="form-label small fw-semibold">Tax Rate (%)</label>
                       <div class="input-group">
@@ -312,7 +292,6 @@
                         <input type="number" step="0.1" class="form-control" id="cfgTaxRate" placeholder="12">
                       </div>
                     </div>
-
                     <div class="col-md-3">
                       <label class="form-label small fw-semibold">Service Charge (%)</label>
                       <div class="input-group">
@@ -322,17 +301,14 @@
                         <input type="number" step="0.1" class="form-control" id="cfgServiceCharge" placeholder="5">
                       </div>
                     </div>
-
                     <div class="col-md-2">
                       <label class="form-label small fw-semibold">Currency</label>
                       <input class="form-control" id="cfgCurrency" required>
                     </div>
-
                     <div class="col-md-4">
                       <label class="form-label small fw-semibold">Timezone</label>
                       <input class="form-control" id="cfgTimezone">
                     </div>
-
                     <div class="col-md-4">
                       <label class="form-label small fw-semibold">Ordering Mode</label>
                       <div class="form-check form-switch mt-2">
@@ -340,17 +316,14 @@
                         <label class="form-check-label small fw-semibold" for="cfgDisableKds">Disable Kitchen Display System</label>
                       </div>
                     </div>
-
                     <div class="col-md-4">
                       <label class="form-label small fw-semibold">Receipt Footer</label>
                       <input class="form-control" id="cfgReceiptFooter">
                     </div>
-
                     <div class="col-md-4">
                       <label class="form-label small fw-semibold">Senior Citizen / PWD Discount (%)</label>
                       <input type="number" step="0.1" min="0" max="100" class="form-control" id="cfgSeniorPwdDiscount" placeholder="20">
                     </div>
-
                     <div class="col-md-4">
                       <label class="form-label small fw-semibold">VAT Pricing (Philippines)</label>
                       <div class="form-check form-switch mt-2">
@@ -359,14 +332,13 @@
                       </div>
                     </div>
                   </div>
-
                   <button class="btn btn-primary mt-3"><i class="fa-solid fa-floppy-disk me-1"></i>Save Settings</button>
                   <button type="button" class="btn btn-outline-danger mt-3 ms-2" onclick="triggerDbSetup()">Reset Database</button>
                 </form>
               </div>
             </div>
 
-            <!-- BRANCHES TAB (MULTI-BRANCH) -->
+            <!-- BRANCHES TAB -->
             <div class="tab-pane fade" id="tabBranches">
               <div class="card card-pos p-3">
                 <div class="d-flex justify-content-between align-items-center mb-2">
@@ -399,26 +371,21 @@
                   <h5 class="mb-0" id="cfgMenuFormTitle">Add / Edit Menu Item</h5>
                   <button type="button" class="btn btn-sm btn-outline-secondary" onclick="resetMenuForm()"><i class="fa-solid fa-rotate-left me-1"></i>Reset Form</button>
                 </div>
-                
                 <form onsubmit="saveMenuItem(event)" class="row g-3 mb-4">
                   <input type="hidden" id="cfgMenuId">
                   <input type="hidden" id="cfgMenuImageUrl">
-
                   <div class="col-md-3">
                     <label class="form-label small fw-semibold">Item Name</label>
                     <input class="form-control" id="cfgMenuName" placeholder="e.g. Pork Sisig" required>
                   </div>
-                  
                   <div class="col-md-2">
                     <label class="form-label small fw-semibold">Category</label>
                     <select class="form-select" id="cfgMenuCategory" required></select>
                   </div>
-
                   <div class="col-md-2">
                     <label class="form-label small fw-semibold">Price (₱)</label>
                     <input type="number" step="0.01" min="0" class="form-control" id="cfgMenuPrice" placeholder="0.00" required>
                   </div>
-
                   <div class="col-md-2">
                     <label class="form-label small fw-semibold">Station</label>
                     <select class="form-select" id="cfgMenuStation" required>
@@ -429,7 +396,6 @@
                       <option value="Desserts">Desserts</option>
                     </select>
                   </div>
-
                   <div class="col-md-3">
                     <label class="form-label small fw-semibold">Branch Availability</label>
                     <select class="form-select" id="cfgMenuAvailable">
@@ -437,19 +403,16 @@
                       <option value="false">Unavailable</option>
                     </select>
                   </div>
-
                   <div class="col-md-8">
                     <label class="form-label small fw-semibold">Upload Item Picture</label>
                     <input type="file" id="cfgMenuImageFile" class="form-control" accept="image/*" onchange="previewMenuImage(this)">
                   </div>
-
                   <div class="col-md-4 d-flex align-items-center gap-3">
                     <div id="cfgMenuPreviewBox" class="d-flex align-items-center gap-2">
                       <img id="cfgMenuImagePreview" src="" class="img-preview-thumb d-none" alt="Preview">
                       <span id="cfgMenuNoImgText" class="text-muted small">No image uploaded</span>
                     </div>
                   </div>
-
                   <div class="col-12 text-end">
                     <button type="submit" class="btn btn-warning fw-bold px-4"><i class="fa-solid fa-floppy-disk me-1"></i>Save Menu Item</button>
                   </div>
@@ -499,33 +462,16 @@
                     <i class="fa-solid fa-rotate-left me-1"></i>Reset Form
                   </button>
                 </div>
-
                 <form onsubmit="saveTable(event)" class="row g-2 mb-4">
                   <input type="hidden" id="cfgTableId">
-                  <div class="col-md-5">
-                    <input class="form-control" id="cfgTableName" placeholder="Table Name (e.g. Table 9 or VIP 1)" required>
-                  </div>
-                  <div class="col-md-3">
-                    <input type="number" class="form-control" id="cfgTableCapacity" placeholder="Capacity" value="4" min="1" required>
-                  </div>
-                  <div class="col-md-4">
-                    <button class="btn btn-success w-100 fw-bold" id="cfgTableSubmitBtn">
-                      <i class="fa-solid fa-floppy-disk me-1"></i>Save Table
-                    </button>
-                  </div>
+                  <div class="col-md-5"><input class="form-control" id="cfgTableName" placeholder="Table Name (e.g. Table 9 or VIP 1)" required></div>
+                  <div class="col-md-3"><input type="number" class="form-control" id="cfgTableCapacity" placeholder="Capacity" value="4" min="1" required></div>
+                  <div class="col-md-4"><button class="btn btn-success w-100 fw-bold" id="cfgTableSubmitBtn"><i class="fa-solid fa-floppy-disk me-1"></i>Save Table</button></div>
                 </form>
-
                 <h6 class="text-muted border-top pt-3">Existing Tables (Current Branch)</h6>
                 <div class="table-responsive">
                   <table class="table table-sm table-hover align-middle">
-                    <thead>
-                      <tr>
-                        <th>Table</th>
-                        <th>Capacity</th>
-                        <th>Status</th>
-                        <th class="text-end">Actions</th>
-                      </tr>
-                    </thead>
+                    <thead><tr><th>Table</th><th>Capacity</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
                     <tbody id="tablesTableBody"></tbody>
                   </table>
                 </div>
@@ -544,6 +490,7 @@
               </div>
             </div>
 
+            <!-- USERS TAB -->
             <div class="tab-pane fade" id="tabUsers">
               <div class="card card-pos p-3">
                 <h5 class="mb-3">Add / Edit User</h5>
@@ -565,6 +512,7 @@
               </div>
             </div>
 
+            <!-- ACTIVITY LOG TAB -->
             <div class="tab-pane fade" id="tabLogs">
               <div class="card card-pos p-3">
                 <button class="btn btn-sm btn-outline-secondary mb-3" onclick="loadActivityLogs()">Refresh Logs</button>
@@ -616,30 +564,33 @@
               </div>
             </div>
 
-            <!-- END OF DAY & Z-READING TAB (WITH OPENING CASH FLOAT) -->
+            <!-- END OF DAY & Z-READING TAB -->
             <div class="tab-pane fade" id="tabEOD">
               <div class="card card-pos p-3 mb-4">
                 <h5 class="mb-3"><i class="fa-solid fa-moon me-2"></i>End of Day Z-Reading Report &amp; Close POS</h5>
                 <div class="row g-2 mb-3">
                   <div class="col-6 col-md-3">
                     <label class="form-label small fw-semibold">Business Date</label>
-                    <input type="date" class="form-control" id="eodDate" onchange="syncEodFloatInput()">
+                    <input type="date" class="form-control" id="eodDate" onchange="syncEodDrawerInputs()">
                   </div>
                   <div class="col-6 col-md-3">
                     <label class="form-label small fw-semibold">Opening Cash Float</label>
                     <div class="input-group">
                       <span class="input-group-text" id="eodFloatCurrencyPrefix">₱</span>
-                      <input type="number" step="0.01" min="0" class="form-control" id="eodOpeningFloat" placeholder="0.00" oninput="saveEodFloatValue()">
+                      <input type="number" step="0.01" min="0" class="form-control" id="eodOpeningFloat" placeholder="0.00" oninput="onEodCashInputChange()">
                     </div>
                   </div>
-                  <div class="col-6 col-md-3 d-flex align-items-end">
-                    <button class="btn btn-primary me-2" onclick="loadEODReport()">Generate Report</button>
-                    <button class="btn btn-outline-secondary" onclick="printEODReport()"><i class="fa-solid fa-print me-1"></i>Print</button>
+                  <div class="col-6 col-md-3">
+                    <label class="form-label small fw-semibold">Actual Cash Counted</label>
+                    <div class="input-group">
+                      <span class="input-group-text" id="eodActualCurrencyPrefix">₱</span>
+                      <input type="number" step="0.01" min="0" class="form-control" id="eodActualCash" placeholder="0.00" oninput="onEodCashInputChange()">
+                    </div>
                   </div>
-                  <div class="col-6 col-md-3 d-flex align-items-end justify-content-end">
-                    <button class="btn btn-danger" onclick="closePOS()">
-                      <i class="fa-solid fa-power-off me-1"></i>Close POS for the Day
-                    </button>
+                  <div class="col-6 col-md-3 d-flex align-items-end gap-2">
+                    <button class="btn btn-primary flex-grow-1" onclick="loadEODReport()">Generate</button>
+                    <button class="btn btn-outline-secondary" onclick="printEODReport()" title="Print Z-Reading"><i class="fa-solid fa-print"></i></button>
+                    <button class="btn btn-danger" onclick="closePOS()" title="Close POS for the Day"><i class="fa-solid fa-power-off"></i></button>
                   </div>
                 </div>
                 <div id="eodReport"></div>
@@ -670,7 +621,7 @@
   </div>
 </div>
 
-<!-- SUPABASE CONNECTION SETUP MODAL (KEEPS KEYS OUT OF GITHUB) -->
+<!-- SUPABASE CONNECTION SETUP MODAL -->
 <div class="modal fade" id="dbConfigModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
@@ -1025,10 +976,6 @@
 
 /* ============================================================
    SECURE SUPABASE CREDENTIAL RESOLVER (GITHUB-SAFE)
-   Priority:
-   1. window.POS_CONFIG (from optional git-ignored config.js)
-   2. localStorage ('pos_sb_url' / 'pos_sb_key' set via UI modal)
-   3. Inline placeholders (safe to push to GitHub)
    ============================================================ */
 const DEFAULT_SUPABASE_URL = 'YOUR_SUPABASE_URL';
 const DEFAULT_SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
@@ -1099,7 +1046,7 @@ function clearDbConfig() {
 /* ============================================================
    CONSTANTS & GLOBAL STATE
    ============================================================ */
-const APP_VERSION = 'v4.7.0-RT';
+const APP_VERSION = 'v4.8.0-RT';
 const KDS_STATUSES = ['CONFIRMED_BY_COUNTER', 'ACCEPTED_BY_KITCHEN', 'PREPARING'];
 const FOOD_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150"><rect width="150" height="150" fill="#cccccc"/>' +
@@ -1281,30 +1228,51 @@ function showModal(id) { bootstrap.Modal.getOrCreateInstance($(id)).show(); }
 function hideModal(id) { const m = bootstrap.Modal.getInstance($(id)); if (m) m.hide(); }
 
 /* ============================================================
-   OPENING CASH FLOAT HELPERS (EOD Z-READING)
+   OPENING CASH FLOAT & ACTUAL CASH COUNTED HELPERS (EOD Z-READING)
    ============================================================ */
 function getEodFloatKey(dateVal) {
   const bId = state.activeBranchId || (state.user && state.user.branchId) || 'branch-main';
   return `pos_eod_float_${bId}_${dateVal || todayStr()}`;
 }
 
-function syncEodFloatInput() {
-  const input = $('eodOpeningFloat');
-  if (!input) return;
-  if ($('eodFloatCurrencyPrefix')) $('eodFloatCurrencyPrefix').textContent = curr();
-  const dateVal = $('eodDate')?.value || todayStr();
-  const saved = lsGet(getEodFloatKey(dateVal));
-  input.value = saved !== null ? saved : '';
+function getEodActualKey(dateVal) {
+  const bId = state.activeBranchId || (state.user && state.user.branchId) || 'branch-main';
+  return `pos_eod_actual_${bId}_${dateVal || todayStr()}`;
 }
 
-function saveEodFloatValue() {
+function syncEodDrawerInputs() {
   const dateVal = $('eodDate')?.value || todayStr();
-  const raw = $('eodOpeningFloat')?.value ?? '';
-  if (raw === '') {
+  const c = curr();
+  if ($('eodFloatCurrencyPrefix')) $('eodFloatCurrencyPrefix').textContent = c;
+  if ($('eodActualCurrencyPrefix')) $('eodActualCurrencyPrefix').textContent = c;
+
+  const floatInput = $('eodOpeningFloat');
+  if (floatInput) {
+    const savedFloat = lsGet(getEodFloatKey(dateVal));
+    floatInput.value = savedFloat !== null ? savedFloat : '';
+  }
+
+  const actualInput = $('eodActualCash');
+  if (actualInput) {
+    const savedActual = lsGet(getEodActualKey(dateVal));
+    actualInput.value = savedActual !== null ? savedActual : '';
+  }
+}
+
+function saveEodDrawerValues() {
+  const dateVal = $('eodDate')?.value || todayStr();
+  const rawFloat = $('eodOpeningFloat')?.value ?? '';
+  if (rawFloat === '') {
     lsDel(getEodFloatKey(dateVal));
   } else {
-    const val = Math.max(0, parseFloat(raw) || 0);
-    lsSet(getEodFloatKey(dateVal), val.toFixed(2));
+    lsSet(getEodFloatKey(dateVal), Math.max(0, parseFloat(rawFloat) || 0).toFixed(2));
+  }
+
+  const rawActual = $('eodActualCash')?.value ?? '';
+  if (rawActual === '') {
+    lsDel(getEodActualKey(dateVal));
+  } else {
+    lsSet(getEodActualKey(dateVal), Math.max(0, parseFloat(rawActual) || 0).toFixed(2));
   }
 }
 
@@ -1314,6 +1282,34 @@ function getEodOpeningFloat() {
   const dateVal = $('eodDate')?.value || todayStr();
   const saved = lsGet(getEodFloatKey(dateVal));
   return saved ? Math.max(0, parseFloat(saved) || 0) : 0;
+}
+
+function getEodActualCash() {
+  const raw = $('eodActualCash')?.value;
+  if (raw !== undefined && raw !== '') return Math.max(0, parseFloat(raw) || 0);
+  const dateVal = $('eodDate')?.value || todayStr();
+  const saved = lsGet(getEodActualKey(dateVal));
+  return saved !== null && saved !== '' ? Math.max(0, parseFloat(saved) || 0) : null;
+}
+
+function onEodCashInputChange() {
+  saveEodDrawerValues();
+  const dateVal = $('eodDate')?.value || todayStr();
+  if (window._lastEOD && window._lastEOD.date === dateVal) {
+    const openingFloat = getEodOpeningFloat();
+    const actualCash = getEodActualCash();
+    const cashSales = Number(window._lastEOD.cashDrawer?.cashSales || 0);
+    const expectedCash = openingFloat + cashSales;
+    const variance = actualCash !== null ? (actualCash - expectedCash) : null;
+    window._lastEOD.cashDrawer = {
+      ...window._lastEOD.cashDrawer,
+      openingFloat,
+      expectedCash,
+      actualCash,
+      variance
+    };
+    renderEODReportHtml(window._lastEOD);
+  }
 }
 
 /* ============================================================
@@ -1811,8 +1807,12 @@ async function callServer(fnName, ...args) {
       };
     }
     case 'getEndOfDayReport': {
-      const [, dateVal, openingFloatRaw] = args;
+      const [, dateVal, openingFloatRaw, actualCashRaw] = args;
       const openingFloat = Math.max(0, Number(openingFloatRaw) || 0);
+      const actualCash = (actualCashRaw !== null && actualCashRaw !== undefined && actualCashRaw !== '')
+        ? Math.max(0, Number(actualCashRaw) || 0)
+        : null;
+
       const [{ data: ords }, { data: itms }] = await Promise.all([
         sbClient.from('orders').select('*').eq('BranchID', bId).gte('CreatedAt', `${dateVal}T00:00:00`).lte('CreatedAt', `${dateVal}T23:59:59`),
         sbClient.from('order_items').select('*').eq('BranchID', bId)
@@ -1841,6 +1841,9 @@ async function callServer(fnName, ...args) {
           cashTendered += Number(o.AmountTendered || o.GrandTotal || 0);
         }
       });
+
+      const expectedCash = openingFloat + cashSales;
+      const variance = actualCash !== null ? (actualCash - expectedCash) : null;
 
       const paidIds = new Set(paid.map(o => o.OrderID));
       const soldItems = (itms || []).filter(i => paidIds.has(i.OrderID));
@@ -1878,7 +1881,9 @@ async function callServer(fnName, ...args) {
           cashSales,
           cashTendered,
           changeGiven: totalChange,
-          expectedCash: openingFloat + cashSales
+          expectedCash,
+          actualCash,
+          variance
         },
         totals: {
           subtotal: paid.reduce((s, o) => s + Number(o.Subtotal || 0), 0),
@@ -2024,7 +2029,7 @@ async function switchBranch(branchId) {
   await poll(true);
   if (state.currentView === 'admin') {
     loadAdminStats();
-    syncEodFloatInput();
+    syncEodDrawerInputs();
     if ($('eodReport')) $('eodReport').innerHTML = '';
   }
   hideLoading();
@@ -2397,6 +2402,7 @@ function applyBootstrap(data) {
     $('settingsBranchBadge').textContent = activeBr ? `Branch: ${activeBr.BranchName} (${activeBr.BranchCode})` : 'Current Branch Settings';
   }
   if ($('eodFloatCurrencyPrefix')) $('eodFloatCurrencyPrefix').textContent = curr();
+  if ($('eodActualCurrencyPrefix')) $('eodActualCurrencyPrefix').textContent = curr();
   renderBranchSwitcher();
   renderBranchesAdminTable();
   populateAdminForms();
@@ -2419,7 +2425,7 @@ function switchView(view) {
   document.querySelectorAll('.spa-view').forEach(el => el.style.display = 'none');
   const el = $(`view-${view}`);
   if (el) el.style.display = 'block';
-  
+
   document.querySelectorAll('.navMenu .nav-link').forEach(x => {
     x.classList.toggle('active', x.dataset.view === view);
   });
@@ -2430,7 +2436,7 @@ function switchView(view) {
       loadAdminStats(); loadActivityLogs();
     }
     if (!$('eodDate').value) $('eodDate').value = todayStr();
-    syncEodFloatInput();
+    syncEodDrawerInputs();
   }
   renderCurrentView();
 }
@@ -3293,7 +3299,7 @@ async function submitOrder() {
 }
 
 /* ============================================================
-   ADMIN FORMS & REPORTS (SEARCH/FILTER, CATEGORY DELETE, EOD FLOAT)
+   ADMIN FORMS & REPORTS (SEARCH/FILTER, CATEGORY DELETE, EOD FLOAT & VARIANCE)
    ============================================================ */
 function compressImageFile(file) {
   return new Promise((resolve) => {
@@ -3689,138 +3695,179 @@ function exportSalesReportCsv() {
   link.click();
 }
 
+function renderEODReportHtml(r) {
+  const c = r.currency || '₱', fmt = n => c + Number(n || 0).toFixed(2);
+  const row = (lbl, val, cls = '') => `<div style="display:flex; justify-content:space-between; margin-bottom:2px;" class="${cls}"><span>${lbl}</span><span>${val}</span></div>`;
+
+  const paymentRows = (r.paymentBreakdown || []).length
+    ? r.paymentBreakdown.map(p => row(`${escapeHtml(p.method)} (${p.count})`, fmt(p.total))).join('')
+    : '<div class="text-muted small">No paid transactions</div>';
+
+  const itemRows = (r.itemsSold || []).length
+    ? r.itemsSold.map(i => `<div style="display:flex; justify-content:space-between; margin-bottom:2px; font-size:0.78rem;"><span>${i.quantity}x ${escapeHtml(i.name)}</span><span>${fmt(i.total)}</span></div>`).join('')
+    : '<div class="text-muted small">No items sold</div>';
+
+  const cd = r.cashDrawer || {};
+  const hasActual = cd.actualCash !== null && cd.actualCash !== undefined;
+  let varianceHtml = '';
+  if (hasActual) {
+    const v = Number(cd.variance || 0);
+    const absFmt = fmt(Math.abs(v));
+    if (Math.abs(v) < 0.005) {
+      varianceHtml = row('Cash Over / Short:', `${fmt(0)} (EXACT)`, 'fw-bold text-success');
+    } else if (v > 0) {
+      varianceHtml = row('Cash Over / Short:', `+${absFmt} (OVER)`, 'fw-bold text-primary');
+    } else {
+      varianceHtml = row('Cash Over / Short:', `-${absFmt} (SHORT)`, 'fw-bold text-danger');
+    }
+  } else {
+    varianceHtml = row('Cash Over / Short:', 'Not Counted', 'text-muted');
+  }
+
+  $('eodReport').innerHTML = `
+    <div class="border rounded p-4 bg-white shadow-sm mx-auto" id="eodPrintArea" style="max-width:440px; font-family:'Courier New', Courier, monospace; color:#000;">
+      <div style="text-align:center; border-bottom:2px dashed #000; padding-bottom:8px; margin-bottom:8px;">
+        <div style="font-weight:bold; font-size:1.1rem;">${escapeHtml(r.restaurantName)}</div>
+        <div style="font-size:0.8rem;">${escapeHtml(r.branchName)}</div>
+        ${r.branchAddress ? `<div style="font-size:0.75rem;">${escapeHtml(r.branchAddress)}</div>` : ''}
+        <div style="font-weight:bold; margin-top:4px;">*** Z-READING / END OF DAY ***</div>
+      </div>
+
+      <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
+        ${row('Z-Report #:', escapeHtml(r.reportNo))}
+        ${row('Business Date:', escapeHtml(r.date))}
+        ${row('Printed At:', escapeHtml(r.printedAt))}
+        ${row('Generated By:', escapeHtml(r.generatedBy))}
+      </div>
+
+      <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
+        <div style="font-weight:bold; margin-bottom:3px;">TRANSACTION SUMMARY</div>
+        ${row('Paid Orders:', r.counts?.paid || 0)}
+        ${row('Cancelled / Voided:', r.counts?.cancelled || 0)}
+        ${row('Open / Unpaid Orders:', r.counts?.open || 0)}
+        ${row('Total Items Sold:', r.counts?.itemsQty || 0)}
+      </div>
+
+      <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
+        <div style="font-weight:bold; margin-bottom:3px;">SALES &amp; DISCOUNTS</div>
+        ${row('Gross Subtotal:', fmt(r.totals?.subtotal))}
+        ${row('Less VAT (12%):', '-' + fmt(r.totals?.lessVat))}
+        ${row('SC/PWD &amp; Discounts:', '-' + fmt(r.totals?.discount))}
+        ${row('Service Charges:', fmt(r.totals?.serviceCharge))}
+        <div style="border-top:1px solid #000; margin:4px 0;"></div>
+        ${row('NET TOTAL SALES:', fmt(r.totals?.sales), 'fw-bold fs-6')}
+      </div>
+
+      <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
+        <div style="font-weight:bold; margin-bottom:3px;">PAYMENT METHOD BREAKDOWN</div>
+        ${paymentRows}
+      </div>
+
+      <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
+        <div style="font-weight:bold; margin-bottom:3px;">CASH DRAWER RECONCILIATION</div>
+        ${row('Opening Cash Float:', fmt(cd.openingFloat))}
+        ${row('Cash Sales:', fmt(cd.cashSales))}
+        ${row('Total Amount Tendered:', fmt(r.totalCollected))}
+        ${row('Total Change Given:', '-' + fmt(r.totalChange))}
+        <div style="border-top:1px solid #000; margin:4px 0;"></div>
+        ${row('Expected Cash in Drawer:', fmt(cd.expectedCash), 'fw-bold')}
+        ${row('Actual Cash Counted:', hasActual ? fmt(cd.actualCash) : '—')}
+        ${varianceHtml}
+      </div>
+
+      <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
+        <div style="font-weight:bold; margin-bottom:3px;">BIR VAT BREAKDOWN</div>
+        ${row('VATable Sales:', fmt(r.totals?.vatableSales))}
+        ${row('VAT-Exempt Sales:', fmt(r.totals?.vatExemptSales))}
+        ${row('VAT Amount (12%):', fmt(r.totals?.tax))}
+      </div>
+
+      <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:8px;">
+        <div style="font-weight:bold; margin-bottom:3px;">ITEMS SOLD SUMMARY</div>
+        ${itemRows}
+      </div>
+
+      <div style="text-align:center; font-size:0.75rem; margin-top:10px;">
+        <div>*** END OF Z-READING REPORT ***</div>
+        <div style="margin-top:18px; border-top:1px solid #000; width:70%; margin-left:auto; margin-right:auto; padding-top:2px;">Manager / Cashier Signature</div>
+      </div>
+    </div>`;
+}
+
 async function loadEODReport() {
   try {
-    showLoading('Generating EOD Z-Reading report…');
     const dateVal = $('eodDate').value || todayStr();
+    saveEodDrawerValues();
     const openingFloat = getEodOpeningFloat();
-    const r = await callServer('getEndOfDayReport', state.token, dateVal, openingFloat);
-    hideLoading(); window._lastEOD = r; state.eodGenerated = { date: r.date, at: Date.now() };
-    const c = r.currency || '₱', fmt = n => c + Number(n || 0).toFixed(2);
-    const row = (lbl, val, cls = '') => `<div style="display:flex; justify-content:space-between; margin-bottom:2px;" class="${cls}"><span>${lbl}</span><span>${val}</span></div>`;
-
-    const paymentRows = (r.paymentBreakdown || []).length
-      ? r.paymentBreakdown.map(p => row(`${escapeHtml(p.method)} (${p.count})`, fmt(p.total))).join('')
-      : '<div class="text-muted small">No paid transactions</div>';
-
-    const itemRows = (r.itemsSold || []).length
-      ? r.itemsSold.map(i => `<div style="display:flex; justify-content:space-between; margin-bottom:2px; font-size:0.78rem;"><span>${i.quantity}x ${escapeHtml(i.name)}</span><span>${fmt(i.total)}</span></div>`).join('')
-      : '<div class="text-muted small">No items sold</div>';
-
-    $('eodReport').innerHTML = `
-      <div class="border rounded p-4 bg-white shadow-sm mx-auto" id="eodPrintArea" style="max-width:440px; font-family:'Courier New', Courier, monospace; color:#000;">
-        <div style="text-align:center; border-bottom:2px dashed #000; padding-bottom:8px; margin-bottom:8px;">
-          <div style="font-weight:bold; font-size:1.1rem;">${escapeHtml(r.restaurantName)}</div>
-          <div style="font-size:0.8rem;">${escapeHtml(r.branchName)}</div>
-          ${r.branchAddress ? `<div style="font-size:0.75rem;">${escapeHtml(r.branchAddress)}</div>` : ''}
-          <div style="font-weight:bold; margin-top:4px;">*** Z-READING / END OF DAY ***</div>
-        </div>
-
-        <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
-          ${row('Z-Report #:', escapeHtml(r.reportNo))}
-          ${row('Business Date:', escapeHtml(r.date))}
-          ${row('Printed At:', escapeHtml(r.printedAt))}
-          ${row('Generated By:', escapeHtml(r.generatedBy))}
-        </div>
-
-        <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
-          <div style="font-weight:bold; margin-bottom:3px;">TRANSACTION SUMMARY</div>
-          ${row('Paid Orders:', r.counts?.paid || 0)}
-          ${row('Cancelled / Voided:', r.counts?.cancelled || 0)}
-          ${row('Open / Unpaid Orders:', r.counts?.open || 0)}
-          ${row('Total Items Sold:', r.counts?.itemsQty || 0)}
-        </div>
-
-        <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
-          <div style="font-weight:bold; margin-bottom:3px;">SALES &amp; DISCOUNTS</div>
-          ${row('Gross Subtotal:', fmt(r.totals?.subtotal))}
-          ${row('Less VAT (12%):', '-' + fmt(r.totals?.lessVat))}
-          ${row('SC/PWD &amp; Discounts:', '-' + fmt(r.totals?.discount))}
-          ${row('Service Charges:', fmt(r.totals?.serviceCharge))}
-          <div style="border-top:1px solid #000; margin:4px 0;"></div>
-          ${row('NET TOTAL SALES:', fmt(r.totals?.sales), 'fw-bold fs-6')}
-        </div>
-
-        <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
-          <div style="font-weight:bold; margin-bottom:3px;">PAYMENT METHOD BREAKDOWN</div>
-          ${paymentRows}
-        </div>
-
-        <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
-          <div style="font-weight:bold; margin-bottom:3px;">CASH DRAWER RECONCILIATION</div>
-          ${row('Opening Cash Float:', fmt(r.cashDrawer?.openingFloat))}
-          ${row('Cash Sales:', fmt(r.cashDrawer?.cashSales))}
-          ${row('Total Amount Tendered:', fmt(r.totalCollected))}
-          ${row('Total Change Given:', '-' + fmt(r.totalChange))}
-          <div style="border-top:1px solid #000; margin:4px 0;"></div>
-          ${row('Expected Cash in Drawer:', fmt(r.cashDrawer?.expectedCash), 'fw-bold')}
-        </div>
-
-        <div style="font-size:0.8rem; border-bottom:1px dashed #000; padding-bottom:6px; margin-bottom:6px;">
-          <div style="font-weight:bold; margin-bottom:3px;">VAT BREAKDOWN (BIR)</div>
-          ${row('VATable Sales:', fmt(r.totals?.vatableSales))}
-          ${row('VAT Amount (12%):', fmt(r.totals?.tax))}
-          ${row('VAT-Exempt Sales:', fmt(r.totals?.vatExemptSales))}
-        </div>
-
-        <div style="font-size:0.8rem; border-bottom:2px dashed #000; padding-bottom:6px; margin-bottom:8px;">
-          <div style="font-weight:bold; margin-bottom:3px;">ITEMIZED PRODUCT SALES</div>
-          ${itemRows}
-        </div>
-
-        <div style="text-align:center; font-size:0.75rem; margin-top:8px;">
-          <div>__________________________</div>
-          <div>Manager / Cashier Signature</div>
-          <div style="margin-top:4px;">*** END OF Z-READING ***</div>
-        </div>
-      </div>`;
+    const actualCash = getEodActualCash();
+    showLoading('Generating End of Day Z-Reading…');
+    const r = await callServer('getEndOfDayReport', state.token, dateVal, openingFloat, actualCash);
+    hideLoading();
+    window._lastEOD = r;
+    state.eodGenerated = { branchId: state.activeBranchId || 'branch-main', date: dateVal };
+    renderEODReportHtml(r);
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
 function printEODReport() {
   const area = $('eodPrintArea');
-  if (!area) return toast('Generate the report first.', 'warning');
-  printHtmlDocument('EOD Sales Report', area.outerHTML);
+  if (!area) return toast('Generate the Z-Reading report first before printing.', 'warning');
+  printHtmlDocument('End of Day Z-Reading', area.innerHTML);
 }
+
 async function closePOS() {
   const dateVal = $('eodDate').value || todayStr();
-  if (!state.eodGenerated || state.eodGenerated.date !== dateVal) return showModal('eodRequiredModal');
-  if (!confirm(`Close POS for ${dateVal}?`)) return;
+  const currentBranch = state.activeBranchId || 'branch-main';
+  if (!state.eodGenerated || state.eodGenerated.date !== dateVal || state.eodGenerated.branchId !== currentBranch) {
+    return showModal('eodRequiredModal');
+  }
+  if (!confirm(`Close POS for ${dateVal} on current branch?`)) return;
   try {
-    showLoading('Archiving EOD report…');
+    showLoading('Closing POS & archiving Z-Reading…');
     const res = await callServer('archiveAndResetPOS', state.token, dateVal);
-    showDone(res.message, () => poll(true));
+    state.eodGenerated = null;
+    showDone(res.message, () => { loadBootstrap(); poll(true); });
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
+
 async function downloadZipBackup() {
-  const res = await callServer('exportDatabaseAsZip', state.token);
-  const link = document.createElement('a');
-  link.href = 'data:application/json;base64,' + res.base64Data;
-  link.download = res.fileName;
-  link.click();
+  try {
+    showLoading('Exporting branch backup…');
+    const res = await callServer('exportDatabaseAsZip', state.token);
+    hideLoading();
+    const link = document.createElement('a');
+    link.href = 'data:application/json;base64,' + res.base64Data;
+    link.download = res.fileName;
+    link.click();
+  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
-function openHelpModal() { showModal('helpModal'); }
-function printSystemHelpGuide() { printHtmlDocument('Operations Guide', $('helpModal').querySelector('.modal-body').innerHTML); }
+
+async function triggerDbSetup() {
+  toast('Run the provided supabase_schema.sql in your Supabase SQL Editor to initialize or reset tables.', 'info');
+}
+
 function openChangePasswordModal() { showModal('changePwModal'); }
 async function submitChangePassword() {
-  const oldPw = $('cpOldPw').value, newPw = $('cpNewPw').value, newPw2 = $('cpNewPw2').value;
-  if (newPw !== newPw2) return toast('New passwords do not match', 'danger');
+  const o = $('cpOldPw').value, n1 = $('cpNewPw').value, n2 = $('cpNewPw2').value;
+  if (n1 !== n2) return toast('Passwords do not match.', 'warning');
   try {
     showLoading('Updating…');
-    await callServer('changePassword', state.token, oldPw, newPw);
-    showDone('Password updated!', () => hideModal('changePwModal'));
+    await callServer('changePassword', state.token, o, n1);
+    showDone('Password changed!', () => hideModal('changePwModal'));
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
-async function triggerDbSetup() { toast('Database schema is managed in Supabase SQL Editor.', 'info'); }
 
-window.addEventListener('load', async () => {
-  $('loginVersion').textContent = APP_VERSION;
-  syncPrintModeSelects();
+function openHelpModal() { showModal('helpModal'); }
+function printSystemHelpGuide() {
+  printHtmlDocument('POS Operations Guide', `<h3>POS Operations Guide</h3><p>1. Waiter/Counter places orders.<br>2. Counter processes payments (Cash, Card, GCash, PayMaya, Delivery, Senior/PWD).<br>3. Kitchen updates status via Realtime KDS.<br>4. Waiter serves order &amp; cleans table.<br>5. Admin closes day via Z-Reading with Opening Float &amp; Actual Cash Count.</p>`);
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  if ($('loginVersion')) $('loginVersion').textContent = APP_VERSION;
   if (!hasValidSupabaseCredentials()) {
     openDbConfigModal();
-  } else if (await resumeSession()) {
-    await initSession();
   }
+  if (await resumeSession()) await initSession();
 });
 </script>
 </body>
