@@ -922,9 +922,14 @@
             <div class="mb-2"><label class="form-label fw-semibold small">Change</label><input class="form-control fw-bold bg-light" id="payChange" readonly></div>
             <div class="mb-2">
               <label class="form-label fw-semibold small">Payment Method</label>
-              <select class="form-select" id="payMethod">
-                <option value="Cash">Cash</option><option value="Card">Card</option><option value="GCash">GCash</option><option value="PayMaya">PayMaya</option>
+              <select class="form-select" id="payMethod" onchange="onPaymentMethodChange()">
+                <option value="Cash">Cash</option>
+                <option value="Card">Card</option>
+                <option value="GCash">GCash</option>
+                <option value="PayMaya">PayMaya</option>
+                <option value="Other">Other</option>
               </select>
+              <input class="form-control mt-2 d-none" id="payMethodOther" placeholder="Enter payment method name (e.g. Bank Transfer, Voucher)">
             </div>
             <div class="mb-3"><label class="form-label fw-semibold small">Reference # (optional)</label><input class="form-control" id="payRef" placeholder="e.g. GCash Ref # / Card Trace #"></div>
             <button class="btn btn-success w-100 fw-bold py-2 fs-6 shadow-sm" onclick="submitPayment()"><i class="fa-solid fa-check-circle me-1"></i>Confirm Payment</button>
@@ -1126,7 +1131,7 @@ function clearDbConfig() {
 /* ============================================================
    CONSTANTS & GLOBAL STATE
    ============================================================ */
-const APP_VERSION = 'v4.9.0-RT';
+const APP_VERSION = 'v4.9.1-RT';
 const KDS_STATUSES = ['CONFIRMED_BY_COUNTER', 'ACCEPTED_BY_KITCHEN', 'PREPARING'];
 const FOOD_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150"><rect width="150" height="150" fill="#cccccc"/>' +
@@ -3181,12 +3186,26 @@ function openPaymentModal(orderId) {
   $('payDiscountReason').value = '';
   $('payReceived').value = '';
   $('payChange').value = '';
+  $('payMethod').value = 'Cash';
+  if ($('payMethodOther')) {
+    $('payMethodOther').value = '';
+    $('payMethodOther').classList.add('d-none');
+  }
   $('payRef').value = '';
   $('payDeliveryToggle').checked = false;
   togglePayDeliveryUI();
   togglePaySeniorPwdUI();
   recalcPaymentSummary();
   showModal('paymentModal');
+}
+
+function onPaymentMethodChange() {
+  const isOther = $('payMethod')?.value === 'Other';
+  const otherEl = $('payMethodOther');
+  if (otherEl) {
+    otherEl.classList.toggle('d-none', !isOther);
+    if (isOther) otherEl.focus();
+  }
 }
 
 function togglePaySeniorPwdUI() {
@@ -3199,6 +3218,11 @@ function togglePayDeliveryUI() {
   const on = $('payDeliveryToggle').checked;
   $('payDeliveryFields').classList.toggle('d-none', !on);
   $('payMethod').disabled = on;
+  const otherEl = $('payMethodOther');
+  if (otherEl) {
+    if (on) otherEl.classList.add('d-none');
+    else onPaymentMethodChange();
+  }
   if (on) { onDeliveryPlatformChange(); $('payReceived').value = $('payDue').value; calcChange(); }
 }
 function onDeliveryPlatformChange() {
@@ -3274,17 +3298,27 @@ async function submitPayment() {
   const due = computedTotals.total - (o ? Number(o.AmountPaid || 0) : 0);
   const isDelivery = $('payDeliveryToggle').checked;
   let deliveryPlatform = '';
+  let resolvedPaymentMethod = $('payMethod').value;
+
   if (isDelivery) {
+    resolvedPaymentMethod = 'Delivery';
     deliveryPlatform = $('payDeliveryPlatform').value;
     if (deliveryPlatform === 'Others') deliveryPlatform = $('payDeliveryOther').value.trim();
     if (!deliveryPlatform) return toast('Please enter the delivery platform name.', 'warning');
+  } else if (resolvedPaymentMethod === 'Other') {
+    resolvedPaymentMethod = ($('payMethodOther')?.value || '').trim();
+    if (!resolvedPaymentMethod) {
+      $('payMethodOther')?.focus();
+      return toast('Please enter the payment method name.', 'warning');
+    }
   }
+
   const received = isDelivery ? Math.max(0, due) : (parseFloat($('payReceived').value) || 0);
   if (received + 0.001 < due) return toast(`Insufficient payment amount. Remaining due: ${due.toFixed(2)}`, 'warning');
 
   const id = uuid();
   const payload = {
-    orderId, amountReceived: received, paymentMethod: isDelivery ? 'Delivery' : $('payMethod').value,
+    orderId, amountReceived: received, paymentMethod: resolvedPaymentMethod,
     referenceNumber: $('payRef').value, clientId: id, customerName: $('payCustomerName').value || 'Walk-In Customer',
     isSeniorPwd, seniorPwdId, discount: manualDiscount, discountReason: $('payDiscountReason').value || '',
     computedTotals, isDelivery, deliveryPlatform
@@ -4167,7 +4201,7 @@ async function submitChangePassword() {
 
 function openHelpModal() { showModal('helpModal'); }
 function printSystemHelpGuide() {
-  printHtmlDocument('POS Operations Guide', `<h3>POS Operations Guide</h3><p>1. Waiter/Counter places orders.<br>2. Counter processes payments (Cash, Card, GCash, PayMaya, Delivery, Senior/PWD).<br>3. Kitchen updates status via Realtime KDS.<br>4. Waiter serves order &amp; cleans table.<br>5. Admin closes day via Z-Reading with Opening Float &amp; Actual Cash Count.</p>`);
+  printHtmlDocument('POS Operations Guide', `<h3>POS Operations Guide</h3><p>1. Waiter/Counter places orders.<br>2. Counter processes payments (Cash, Card, GCash, PayMaya, Delivery, Other, Senior/PWD).<br>3. Kitchen updates status via Realtime KDS.<br>4. Waiter serves order &amp; cleans table.<br>5. Admin closes day via Z-Reading with Opening Float &amp; Actual Cash Count.</p>`);
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
