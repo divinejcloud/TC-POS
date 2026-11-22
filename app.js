@@ -3,8 +3,8 @@
 /* ============================================================
    SECURE SUPABASE CREDENTIAL RESOLVER (GITHUB-SAFE)
    ============================================================ */
-const DEFAULT_SUPABASE_URL = 'YOUR_SUPABASE_URL';
-const DEFAULT_SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+const DEFAULT_SUPABASE_URL = 'https://fxhbfwpvxfbphmupaqep.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ4aGJmd3B2eGZicGhtdXBhcWVwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTUzMjY4MDksImV4cCI6MjExMDkwMjgwOX0.FWLitjTSL-cGWrh-62tltEj4aAWHpUqLgUfWMo4miwk';
 
 function isPlaceholderCredential(val) {
   const s = String(val || '').trim();
