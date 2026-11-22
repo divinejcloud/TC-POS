@@ -980,22 +980,46 @@
 const DEFAULT_SUPABASE_URL = 'YOUR_SUPABASE_URL';
 const DEFAULT_SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 
+function isPlaceholderCredential(val) {
+  const s = String(val || '').trim();
+  return !s || s === DEFAULT_SUPABASE_URL || s === DEFAULT_SUPABASE_ANON_KEY || s.includes('YOUR_SUPABASE');
+}
+
+function normalizeSupabaseUrl(raw) {
+  let u = String(raw || '').trim().replace(/\/+$/, '');
+  u = u.replace(/\/rest\/v1$/i, '');
+  return u;
+}
+
 function getSupabaseCredentials() {
   const ext = (window.POS_CONFIG && typeof window.POS_CONFIG === 'object') ? window.POS_CONFIG : {};
-  const url = String(ext.SUPABASE_URL || lsGet('pos_sb_url') || DEFAULT_SUPABASE_URL).trim();
-  const key = String(ext.SUPABASE_ANON_KEY || lsGet('pos_sb_key') || DEFAULT_SUPABASE_ANON_KEY).trim();
-  return { url, key };
+  const extUrl = !isPlaceholderCredential(ext.SUPABASE_URL) ? normalizeSupabaseUrl(ext.SUPABASE_URL) : '';
+  const extKey = !isPlaceholderCredential(ext.SUPABASE_ANON_KEY) ? String(ext.SUPABASE_ANON_KEY).trim() : '';
+
+  const lsUrl = !isPlaceholderCredential(lsGet('pos_sb_url')) ? normalizeSupabaseUrl(lsGet('pos_sb_url')) : '';
+  const lsKey = !isPlaceholderCredential(lsGet('pos_sb_key')) ? String(lsGet('pos_sb_key')).trim() : '';
+
+  return {
+    url: extUrl || lsUrl || DEFAULT_SUPABASE_URL,
+    key: extKey || lsKey || DEFAULT_SUPABASE_ANON_KEY
+  };
 }
 
 function hasValidSupabaseCredentials() {
   const { url, key } = getSupabaseCredentials();
-  return /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url) && key.length > 20 && key !== DEFAULT_SUPABASE_ANON_KEY;
+  if (isPlaceholderCredential(url) || isPlaceholderCredential(key)) return false;
+  try {
+    const parsed = new URL(url);
+    return (parsed.protocol === 'https:' || parsed.protocol === 'http:') && key.length > 20;
+  } catch (e) {
+    return false;
+  }
 }
 
 let sbClient = null;
 function initSb(token) {
   if (!window.supabase || !window.supabase.createClient) {
-    throw new Error('Supabase SDK failed to load. Check internet connection.');
+    throw new Error('Supabase SDK failed to load. Check internet connection and reload.');
   }
   const { url, key } = getSupabaseCredentials();
   if (!hasValidSupabaseCredentials()) {
@@ -1004,7 +1028,20 @@ function initSb(token) {
   }
   sbClient = window.supabase.createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-    global: { headers: token ? { 'x-pos-token': token } : {} },
+    global: {
+      headers: token ? { 'x-pos-token': token } : {},
+      fetch: async (input, init) => {
+        try {
+          return await window.fetch(input, init);
+        } catch (netErr) {
+          const e = new Error(
+            'Cannot reach Supabase server (' + url + '). Check internet connection, verify Project URL in Connection Setup, or ensure your Supabase project is not paused.'
+          );
+          e.isNetwork = true;
+          throw e;
+        }
+      }
+    },
     realtime: { params: { eventsPerSecond: 10 } }
   });
   return sbClient;
@@ -1012,15 +1049,21 @@ function initSb(token) {
 
 function openDbConfigModal() {
   const { url, key } = getSupabaseCredentials();
-  if ($('cfgSbUrlInput')) $('cfgSbUrlInput').value = url.startsWith('http') ? url : '';
-  if ($('cfgSbKeyInput')) $('cfgSbKeyInput').value = key !== DEFAULT_SUPABASE_ANON_KEY ? key : '';
+  if ($('cfgSbUrlInput')) $('cfgSbUrlInput').value = !isPlaceholderCredential(url) ? url : '';
+  if ($('cfgSbKeyInput')) $('cfgSbKeyInput').value = !isPlaceholderCredential(key) ? key : '';
   showModal('dbConfigModal');
 }
 
 function saveDbConfig() {
-  const url = ($('cfgSbUrlInput')?.value || '').trim().replace(/\/+$/, '');
+  const url = normalizeSupabaseUrl($('cfgSbUrlInput')?.value || '');
   const key = ($('cfgSbKeyInput')?.value || '').trim();
-  if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url)) {
+  let validUrl = false;
+  try {
+    const parsed = new URL(url);
+    validUrl = parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch (e) {}
+
+  if (!validUrl) {
     return toast('Enter a valid Supabase URL (https://xxxx.supabase.co).', 'warning');
   }
   if (key.length < 20) {
@@ -2265,8 +2308,14 @@ async function handleLogin(e) {
     $('loginAlert').classList.add('d-none');
     await initSession();
   } catch (err) {
-    $('loginAlert').textContent = err.message;
+    const msg = /failed to fetch/i.test(err.message)
+      ? 'Cannot reach Supabase server. Check internet connection or verify URL & Key in Connection Setup.'
+      : err.message;
+    $('loginAlert').textContent = msg;
     $('loginAlert').classList.remove('d-none');
+    if (err.isNetwork || /failed to fetch|not configured/i.test(err.message)) {
+      openDbConfigModal();
+    }
   } finally {
     btn.disabled = false;
     btn.textContent = 'Sign In';
