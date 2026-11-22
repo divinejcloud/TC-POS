@@ -493,7 +493,12 @@
             <!-- USERS TAB -->
             <div class="tab-pane fade" id="tabUsers">
               <div class="card card-pos p-3">
-                <h5 class="mb-3">Add / Edit User</h5>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                  <h5 class="mb-0" id="cfgUserFormTitle">Add / Edit User</h5>
+                  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="resetUserForm()">
+                    <i class="fa-solid fa-rotate-left me-1"></i>Reset Form
+                  </button>
+                </div>
                 <form onsubmit="saveUser(event)" class="row g-2 mb-4">
                   <input type="hidden" id="cfgUserId">
                   <div class="col-md-2"><input class="form-control" id="cfgUserFullName" placeholder="Full Name" required></div>
@@ -501,11 +506,11 @@
                   <div class="col-md-2"><input type="password" class="form-control" id="cfgUserPassword" placeholder="Password"></div>
                   <div class="col-md-2"><select class="form-select" id="cfgUserRole"><option>Admin</option><option>Manager</option><option>Waiter</option><option>Counter</option><option>Kitchen</option></select></div>
                   <div class="col-md-2"><select class="form-select" id="cfgUserBranch"></select></div>
-                  <div class="col-md-2"><button class="btn btn-primary w-100">Save User</button></div>
+                  <div class="col-md-2"><button class="btn btn-primary w-100 fw-bold">Save User</button></div>
                 </form>
                 <div class="table-responsive">
-                  <table class="table table-sm table-hover">
-                    <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Branch</th><th>Active</th><th>Last Login</th><th>Action</th></tr></thead>
+                  <table class="table table-sm table-hover align-middle">
+                    <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Branch</th><th>Active</th><th>Last Login</th><th class="text-end">Action</th></tr></thead>
                     <tbody id="usersTableBody"></tbody>
                   </table>
                 </div>
@@ -529,7 +534,7 @@
             <div class="tab-pane fade" id="tabReports">
               <div class="card card-pos p-3">
                 <div class="d-flex justify-content-between align-items-center mb-3">
-                  <h5 class="mb-0">Sales Report</h5>
+                  <h5 class="mb-0"><i class="fa-solid fa-chart-line text-primary me-2"></i>Sales Report</h5>
                   <span class="badge bg-secondary" id="reportScopeBadge">Current Branch</span>
                 </div>
                 <div class="row g-2 mb-2">
@@ -540,11 +545,12 @@
                       <option value="ALL">All Branches (Consolidated)</option>
                     </select>
                   </div>
-                  <div class="col-6 col-md-3"><label class="form-label small">Start Date</label><input type="date" class="form-control" id="reportStart"></div>
-                  <div class="col-6 col-md-3"><label class="form-label small">End Date</label><input type="date" class="form-control" id="reportEnd"></div>
+                  <div class="col-6 col-md-3"><label class="form-label small fw-semibold">Start Date</label><input type="date" class="form-control" id="reportStart"></div>
+                  <div class="col-6 col-md-3"><label class="form-label small fw-semibold">End Date</label><input type="date" class="form-control" id="reportEnd"></div>
                   <div class="col-12 col-md-3 d-flex align-items-end gap-2">
-                    <button class="btn btn-primary" onclick="loadSalesReport()">Generate</button>
-                    <button class="btn btn-outline-secondary" onclick="exportSalesReportCsv()"><i class="fa-solid fa-file-csv me-1"></i>CSV</button>
+                    <button class="btn btn-primary fw-bold flex-grow-1" onclick="loadSalesReport()"><i class="fa-solid fa-bolt me-1"></i>Generate</button>
+                    <button class="btn btn-outline-secondary" onclick="printSalesReport()" title="Print Sales Report"><i class="fa-solid fa-print"></i></button>
+                    <button class="btn btn-outline-secondary" onclick="exportSalesReportCsv()" title="Export CSV"><i class="fa-solid fa-file-csv me-1"></i>CSV</button>
                   </div>
                 </div>
                 <div class="d-flex flex-wrap gap-1 mb-3">
@@ -553,21 +559,27 @@
                   <button class="btn btn-sm btn-outline-secondary" onclick="setReportRange('month')">This Month</button>
                   <button class="btn btn-sm btn-outline-secondary" onclick="setReportRange('all')">All Time</button>
                 </div>
-                <div id="reportSummary" class="mb-3"></div>
-                <div id="reportBranchComparison" class="mb-3"></div>
-                <h6 class="mt-3">Top Items</h6>
-                <div id="reportTopItems"></div>
-                <h6 class="mt-3">Daily Sales</h6>
-                <div id="reportDaily"></div>
-                <h6 class="mt-3">Order Details</h6>
-                <div id="reportOrders"></div>
+                <div id="salesReportPrintArea">
+                  <div id="reportSummary" class="mb-3"></div>
+                  <div id="reportBranchComparison" class="mb-3"></div>
+                  <div id="reportPaymentMethods" class="mb-3"></div>
+                  <h6 class="mt-3 fw-bold">Top Selling Items</h6>
+                  <div id="reportTopItems"></div>
+                  <h6 class="mt-3 fw-bold">Daily Sales Breakdown</h6>
+                  <div id="reportDaily"></div>
+                  <h6 class="mt-3 fw-bold">Order Details</h6>
+                  <div id="reportOrders"></div>
+                </div>
               </div>
             </div>
 
             <!-- END OF DAY & Z-READING TAB -->
             <div class="tab-pane fade" id="tabEOD">
               <div class="card card-pos p-3 mb-4">
-                <h5 class="mb-3"><i class="fa-solid fa-moon me-2"></i>End of Day Z-Reading Report &amp; Close POS</h5>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                  <h5 class="mb-0"><i class="fa-solid fa-moon me-2"></i>End of Day Z-Reading Report &amp; Close POS</h5>
+                  <span class="badge bg-warning text-dark" id="eodOpenWarningBadge" style="display:none;"></span>
+                </div>
                 <div class="row g-2 mb-3">
                   <div class="col-6 col-md-3">
                     <label class="form-label small fw-semibold">Business Date</label>
@@ -588,12 +600,37 @@
                     </div>
                   </div>
                   <div class="col-6 col-md-3 d-flex align-items-end gap-2">
-                    <button class="btn btn-primary flex-grow-1" onclick="loadEODReport()">Generate</button>
+                    <button class="btn btn-primary fw-bold flex-grow-1" onclick="loadEODReport()">Generate</button>
                     <button class="btn btn-outline-secondary" onclick="printEODReport()" title="Print Z-Reading"><i class="fa-solid fa-print"></i></button>
-                    <button class="btn btn-danger" onclick="closePOS()" title="Close POS for the Day"><i class="fa-solid fa-power-off"></i></button>
+                    <button class="btn btn-danger fw-bold" onclick="closePOS()" title="Close POS for the Day"><i class="fa-solid fa-power-off me-1"></i>Close POS</button>
                   </div>
                 </div>
                 <div id="eodReport"></div>
+              </div>
+
+              <div class="card card-pos p-3 mb-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <h6 class="fw-bold mb-0"><i class="fa-solid fa-clock-rotate-left text-primary me-2"></i>Recent Z-Reading Closings (Current Branch)</h6>
+                  <button class="btn btn-sm btn-outline-secondary" onclick="loadEodHistory()">Refresh</button>
+                </div>
+                <div class="table-responsive">
+                  <table class="table table-sm table-hover align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th>Business Date</th>
+                        <th>Closed At</th>
+                        <th class="text-end">Total Sales</th>
+                        <th class="text-end">Discounts</th>
+                        <th class="text-end">VATable</th>
+                        <th class="text-end">VAT-Exempt</th>
+                        <th class="text-end">VAT</th>
+                      </tr>
+                    </thead>
+                    <tbody id="eodHistoryBody">
+                      <tr><td colspan="7" class="text-muted small text-center py-2">Click Refresh or generate Z-Reading to view past closings.</td></tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               <div class="card card-pos p-3">
@@ -1089,7 +1126,7 @@ function clearDbConfig() {
 /* ============================================================
    CONSTANTS & GLOBAL STATE
    ============================================================ */
-const APP_VERSION = 'v4.8.0-RT';
+const APP_VERSION = 'v4.9.0-RT';
 const KDS_STATUSES = ['CONFIRMED_BY_COUNTER', 'ACCEPTED_BY_KITCHEN', 'PREPARING'];
 const FOOD_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150"><rect width="150" height="150" fill="#cccccc"/>' +
@@ -1613,6 +1650,37 @@ async function callServer(fnName, ...args) {
       await logActivity('UPDATE_SETTINGS', 'Settings', bId, 'Updated branch POS settings');
       return { success: true };
     }
+    case 'deleteBranch': {
+      const [, branchId] = args;
+      if (!branchId || branchId === 'branch-main') {
+        throw new Error('The Main Branch cannot be deleted.');
+      }
+      const { count: orderCount } = await sbClient
+        .from('orders')
+        .select('OrderID', { count: 'exact', head: true })
+        .eq('BranchID', branchId);
+      if ((orderCount || 0) > 0) {
+        throw new Error(`Cannot delete this branch because it has ${orderCount} recorded order(s).`);
+      }
+      const { count: userCount } = await sbClient
+        .from('users')
+        .select('UserID', { count: 'exact', head: true })
+        .eq('BranchID', branchId);
+      if ((userCount || 0) > 0) {
+        throw new Error(`Cannot delete this branch while ${userCount} user(s) are still assigned to it.`);
+      }
+
+      await sbClient.from('system_settings').delete().eq('BranchID', branchId);
+      await sbClient.from('branch_menu_items').delete().eq('BranchID', branchId);
+      await sbClient.from('restaurant_tables').delete().eq('BranchID', branchId);
+      await sbClient.from('eod_reports').delete().eq('BranchID', branchId);
+
+      const { error } = await sbClient.from('branches').delete().eq('BranchID', branchId);
+      if (error) throw new Error(error.message);
+
+      await logActivity('DELETE_BRANCH', 'Branch', branchId, 'Deleted branch');
+      return { success: true, message: 'Branch deleted!' };
+    }
     case 'saveMenuItem': {
       const [, m] = args;
       const cat = state.categories.find(c => c.CategoryID === m.CategoryID);
@@ -1717,6 +1785,23 @@ async function callServer(fnName, ...args) {
       if (error) throw new Error(error.message);
       return data;
     }
+    case 'deleteUser': {
+      const [, userId] = args;
+      if (!userId) throw new Error('Invalid user ID.');
+      if (state.user && String(state.user.userId) === String(userId)) {
+        throw new Error('You cannot delete your currently logged-in account.');
+      }
+      const targetUser = (state.users || []).find(u => String(u.UserID) === String(userId));
+      if (targetUser && String(targetUser.Username).toLowerCase() === 'admin') {
+        throw new Error('The primary admin account cannot be deleted.');
+      }
+      await sbClient.from('sessions').delete().eq('UserID', userId);
+      await sbClient.from('activity_logs').update({ UserID: null }).eq('UserID', userId);
+      const { error } = await sbClient.from('users').delete().eq('UserID', userId);
+      if (error) throw new Error(error.message);
+      await logActivity('DELETE_USER', 'User', userId, `Deleted user ${targetUser ? targetUser.Username : userId}`);
+      return { success: true, message: 'User deleted!' };
+    }
     case 'changePassword': {
       const [, oldPw, newPw] = args;
       const { data, error } = await sbClient.rpc('pos_change_password', { p_old_pw: oldPw, p_new_pw: newPw });
@@ -1790,6 +1875,22 @@ async function callServer(fnName, ...args) {
           share: totalSales ? ((b.sales / totalSales) * 100).toFixed(1) : '0.0'
         }));
 
+      const paymentMap = {};
+      paid.forEach(o => {
+        const label = o.PaymentMethod === 'Delivery' && o.DeliveryPlatform
+          ? `Delivery (${o.DeliveryPlatform})`
+          : (o.PaymentMethod || 'Cash');
+        if (!paymentMap[label]) paymentMap[label] = { method: label, orders: 0, sales: 0 };
+        paymentMap[label].orders++;
+        paymentMap[label].sales += Number(o.GrandTotal || 0);
+      });
+      const paymentBreakdown = Object.values(paymentMap)
+        .sort((a, b) => b.sales - a.sales)
+        .map(p => ({
+          ...p,
+          share: totalSales ? ((p.sales / totalSales) * 100).toFixed(1) : '0.0'
+        }));
+
       const topMap = {};
       items.forEach(i => {
         const name = i.ItemNameSnapshot || i.ItemName;
@@ -1827,11 +1928,12 @@ async function callServer(fnName, ...args) {
           orderNumber: o.OrderNumber,
           table: o.TableNumber || 'Takeout',
           customer: o.CustomerName || 'Walk-In',
-          method: o.PaymentMethod || 'Cash',
+          method: o.PaymentMethod === 'Delivery' && o.DeliveryPlatform ? `Delivery (${o.DeliveryPlatform})` : (o.PaymentMethod || 'Cash'),
           itemQty: oItems.reduce((s, i) => s + Number(i.Quantity || i.Qty || 0), 0),
           subtotal: Number(o.Subtotal || 0),
           discount: Number(o.Discount || 0),
           tax: Number(o.Tax || 0),
+          service: Number(o.ServiceCharge || 0),
           total: Number(o.GrandTotal || 0)
         };
       });
@@ -1844,6 +1946,7 @@ async function callServer(fnName, ...args) {
         counts: { paid: paid.length, cancelled: cancelled.length, open: open.length },
         averageOrderValue: paid.length ? totalSales / paid.length : 0,
         branchBreakdown,
+        paymentBreakdown,
         topItems,
         daily: Object.values(dailyMap).sort((a, b) => b.date.localeCompare(a.date)),
         orders: orderRows
@@ -1943,11 +2046,21 @@ async function callServer(fnName, ...args) {
         itemsSold: Object.values(itemMap).sort((a, b) => b.quantity - a.quantity)
       };
     }
+    case 'getEodHistory': {
+      const { data, error } = await sbClient
+        .from('eod_reports')
+        .select('*')
+        .eq('BranchID', bId)
+        .order('BusinessDate', { ascending: false })
+        .limit(30);
+      if (error) throw new Error(error.message);
+      return data || [];
+    }
     case 'archiveAndResetPOS': {
       const [, dateVal] = args;
       const r = window._lastEOD;
       if (r) {
-        await sbClient.from('eod_reports').insert({
+        const baseRecord = {
           ReportID: uuid(),
           BranchID: bId,
           BusinessDate: dateVal,
@@ -1957,10 +2070,21 @@ async function callServer(fnName, ...args) {
           VatExemptSales: r.totals?.vatExemptSales || 0,
           VatableSales: r.totals?.vatableSales || 0,
           VatAmount: r.totals?.tax || 0
-        });
+        };
+        const extendedRecord = {
+          ...baseRecord,
+          OpeningFloat: r.cashDrawer?.openingFloat ?? 0,
+          ActualCash: r.cashDrawer?.actualCash ?? null
+        };
+        const { error: extErr } = await sbClient.from('eod_reports').insert(extendedRecord);
+        if (extErr) {
+          const { error: baseErr } = await sbClient.from('eod_reports').insert(baseRecord);
+          if (baseErr) throw new Error(baseErr.message);
+        }
       }
       await sbClient.from('orders').update({ OrderStatus: 'COMPLETED' }).eq('BranchID', bId).eq('PaymentStatus', 'PAID');
       await sbClient.from('restaurant_tables').update({ Status: 'Available', CurrentOrderID: null, ReservedFor: null }).eq('BranchID', bId);
+      await logActivity('CLOSE_POS', 'EOD', dateVal, `Closed POS for ${dateVal} (Sales: ${Number(r?.totals?.sales || 0).toFixed(2)})`);
       return { success: true, message: `POS closed and Z-Reading archived for ${dateVal}` };
     }
     case 'exportDatabaseAsZip': {
@@ -2073,6 +2197,7 @@ async function switchBranch(branchId) {
   if (state.currentView === 'admin') {
     loadAdminStats();
     syncEodDrawerInputs();
+    loadEodHistory();
     if ($('eodReport')) $('eodReport').innerHTML = '';
   }
   hideLoading();
@@ -2081,17 +2206,23 @@ async function switchBranch(branchId) {
 function renderBranchesAdminTable() {
   const tbody = $('branchesTableBody');
   if (!tbody) return;
-  tbody.innerHTML = (state.branches || []).map(b => `
+  tbody.innerHTML = (state.branches || []).map(b => {
+    const isMain = b.BranchID === 'branch-main';
+    const delBtn = isMain
+      ? `<button class="btn btn-sm btn-outline-secondary fw-bold" disabled title="Main Branch cannot be deleted"><i class="fa-solid fa-lock me-1"></i>Protected</button>`
+      : `<button class="btn btn-sm btn-outline-danger fw-bold" onclick="deleteBranchById('${escapeHtml(b.BranchID)}', '${escapeHtml(b.BranchName)}')"><i class="fa-solid fa-trash me-1"></i>Delete</button>`;
+    return `
     <tr>
       <td><strong>${escapeHtml(b.BranchName)}</strong></td>
       <td><span class="badge bg-dark">${escapeHtml(b.BranchCode)}</span></td>
       <td>${escapeHtml(b.Address || '—')}</td>
       <td>${b.Active ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>'}</td>
-      <td class="text-end">
-        <button class="btn btn-sm btn-outline-primary fw-bold" onclick="editBranch('${escapeHtml(b.BranchID)}')"><i class="fa-solid fa-pen-to-square me-1"></i>Edit</button>
+      <td class="text-end text-nowrap">
+        <button class="btn btn-sm btn-outline-primary fw-bold me-1" onclick="editBranch('${escapeHtml(b.BranchID)}')"><i class="fa-solid fa-pen-to-square me-1"></i>Edit</button>
+        ${delBtn}
       </td>
-    </tr>
-  `).join('');
+    </tr>`;
+  }).join('');
 
   const uBranch = $('cfgUserBranch');
   if (uBranch) {
@@ -2134,6 +2265,24 @@ async function saveBranch(e) {
     showDone(isNew ? 'Branch created with Main Branch settings!' : 'Branch updated!', () => {
       resetBranchForm();
       loadBootstrap();
+    });
+  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
+}
+
+async function deleteBranchById(branchId, branchName) {
+  if (branchId === 'branch-main') return toast('The Main Branch cannot be deleted.', 'warning');
+  if (!confirm(`Delete branch "${branchName}"? This will remove its branch settings, tables, and menu overrides.`)) return;
+  try {
+    showLoading(`Deleting ${branchName}…`);
+    const res = await callServer('deleteBranch', state.token, branchId);
+    if ($('cfgBranchId').value === branchId) resetBranchForm();
+    if (state.activeBranchId === branchId) {
+      state.activeBranchId = 'branch-main';
+      lsSet('pos_admin_branch', 'branch-main');
+    }
+    showDone(res.message || 'Branch deleted!', async () => {
+      await loadBootstrap();
+      await poll(true);
     });
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
@@ -2482,7 +2631,7 @@ function switchView(view) {
   if (view === 'admin') {
     if (navigator.onLine && Date.now() - (state.adminLoadedAt || 0) > 15000) {
       state.adminLoadedAt = Date.now();
-      loadAdminStats(); loadActivityLogs();
+      loadAdminStats(); loadActivityLogs(); loadEodHistory();
     }
     if (!$('eodDate').value) $('eodDate').value = todayStr();
     syncEodDrawerInputs();
@@ -2965,7 +3114,7 @@ function printHtmlDocument(title, bodyHtml) {
   const win = window.open('', '_blank', standard ? 'width=820,height=900' : 'width=400,height=600');
   if (!win) { toast('Pop-up blocked. Allow pop-ups to print.', 'warning'); return false; }
   const css = standard
-    ? `@page { size: A4; margin: 15mm; } body { font-family: Arial, sans-serif; font-size: 14px; max-width: 520px; margin: 0 auto; color: #000; }`
+    ? `@page { size: A4; margin: 15mm; } body { font-family: Arial, sans-serif; font-size: 13px; max-width: 720px; margin: 0 auto; color: #000; } table { width: 100%; border-collapse: collapse; margin-bottom: 12px; } th, td { border: 1px solid #cbd5e1; padding: 5px 8px; text-align: left; } th { background: #f1f5f9; }`
     : `@page { size: 80mm auto; margin: 0; } body { font-family: 'Courier New', monospace; font-size: 12px; padding: 10px; width: 280px; color: #000; }`;
   win.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml(title)}</title><style>${css}</style></head><body onload="window.print(); window.close();">${bodyHtml}</body></html>`);
   win.document.close();
@@ -3348,7 +3497,7 @@ async function submitOrder() {
 }
 
 /* ============================================================
-   ADMIN FORMS & REPORTS (SEARCH/FILTER, CATEGORY DELETE, EOD FLOAT & VARIANCE)
+   ADMIN FORMS & REPORTS (DELETE BRANCH/USER, REPORTS, EOD Z-READING)
    ============================================================ */
 function compressImageFile(file) {
   return new Promise((resolve) => {
@@ -3572,15 +3721,25 @@ function populateAdminForms() {
   }).join('') : '<div class="text-muted small py-2">No categories configured yet.</div>');
 
   const branchMap = {}; (state.branches || []).forEach(b => { branchMap[b.BranchID] = b.BranchName; });
-  setHtml($('usersTableBody'), (state.users || []).map(u => `<tr>
-    <td>${escapeHtml(u.FullName)}</td>
-    <td>${escapeHtml(u.Username)}</td>
-    <td><span class="badge bg-primary">${escapeHtml(u.Role)}</span></td>
-    <td>${escapeHtml(branchMap[u.BranchID] || (u.Role === 'Admin' ? 'All Branches' : 'Main'))}</td>
-    <td>${u.Active ? '✓' : '✗'}</td>
-    <td class="small text-muted">${u.LastLogin ? new Date(u.LastLogin).toLocaleString() : '—'}</td>
-    <td><button class="btn btn-sm btn-outline-primary" onclick="editUserRow('${escapeHtml(u.UserID)}')">Edit</button></td>
-  </tr>`).join(''));
+  setHtml($('usersTableBody'), (state.users || []).map(u => {
+    const isSelf = state.user && String(state.user.userId) === String(u.UserID);
+    const isPrimaryAdmin = String(u.Username || '').toLowerCase() === 'admin';
+    const delBtn = (isSelf || isPrimaryAdmin)
+      ? `<button class="btn btn-sm btn-outline-secondary fw-bold" disabled title="${isSelf ? 'Cannot delete current user' : 'Primary admin cannot be deleted'}"><i class="fa-solid fa-lock"></i></button>`
+      : `<button class="btn btn-sm btn-outline-danger fw-bold" onclick="deleteUserById('${escapeHtml(u.UserID)}', '${escapeHtml(u.FullName)}')"><i class="fa-solid fa-trash me-1"></i>Delete</button>`;
+    return `<tr>
+      <td>${escapeHtml(u.FullName)}</td>
+      <td>${escapeHtml(u.Username)}</td>
+      <td><span class="badge bg-primary">${escapeHtml(u.Role)}</span></td>
+      <td>${escapeHtml(branchMap[u.BranchID] || (u.Role === 'Admin' ? 'All Branches' : 'Main'))}</td>
+      <td>${u.Active ? '✓' : '✗'}</td>
+      <td class="small text-muted">${u.LastLogin ? new Date(u.LastLogin).toLocaleString() : '—'}</td>
+      <td class="text-end text-nowrap">
+        <button class="btn btn-sm btn-outline-primary fw-bold me-1" onclick="editUserRow('${escapeHtml(u.UserID)}')"><i class="fa-solid fa-pen-to-square me-1"></i>Edit</button>
+        ${delBtn}
+      </td>
+    </tr>`;
+  }).join(''));
 }
 
 function editUserRow(uid) {
@@ -3589,8 +3748,30 @@ function editUserRow(uid) {
   $('cfgUserId').value = u.UserID;
   $('cfgUserFullName').value = u.FullName;
   $('cfgUserUsername').value = u.Username;
+  $('cfgUserPassword').value = '';
   $('cfgUserRole').value = u.Role;
   if ($('cfgUserBranch')) $('cfgUserBranch').value = u.BranchID || '';
+  if ($('cfgUserFormTitle')) $('cfgUserFormTitle').textContent = `Edit User (${u.FullName})`;
+}
+
+function resetUserForm() {
+  $('cfgUserId').value = '';
+  $('cfgUserFullName').value = '';
+  $('cfgUserUsername').value = '';
+  $('cfgUserPassword').value = '';
+  $('cfgUserRole').value = 'Waiter';
+  if ($('cfgUserBranch')) $('cfgUserBranch').value = state.activeBranchId || '';
+  if ($('cfgUserFormTitle')) $('cfgUserFormTitle').textContent = 'Add / Edit User';
+}
+
+async function deleteUserById(userId, fullName) {
+  if (!confirm(`Delete user "${fullName}"? Their active sessions will be terminated immediately.`)) return;
+  try {
+    showLoading(`Deleting ${fullName}…`);
+    const res = await callServer('deleteUser', state.token, userId);
+    if ($('cfgUserId').value === userId) resetUserForm();
+    showDone(res.message || 'User deleted!', () => loadBootstrap());
+  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
 function onToggleDisableKds(el) {
@@ -3638,7 +3819,7 @@ async function saveUser(e) {
       UserID: $('cfgUserId').value, FullName: $('cfgUserFullName').value, Username: $('cfgUserUsername').value,
       Password: $('cfgUserPassword').value, Role: $('cfgUserRole').value, BranchID: $('cfgUserBranch')?.value || null
     });
-    showDone('User saved!', () => { $('cfgUserId').value = ''; $('cfgUserFullName').value = ''; $('cfgUserUsername').value = ''; $('cfgUserPassword').value = ''; loadBootstrap(); });
+    showDone('User saved!', () => { resetUserForm(); loadBootstrap(); });
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
@@ -3688,7 +3869,20 @@ function renderSalesReport(d) {
     badge.className = d.allBranches ? 'badge bg-warning text-dark' : 'badge bg-secondary';
   }
 
-  $('reportSummary').innerHTML = `<div class="row g-2"><div class="col-6 col-md-3"><div class="stat-card bg-primary"><h6>Net Sales</h6><h4>${fmt(t.sales)}</h4></div></div><div class="col-6 col-md-3"><div class="stat-card bg-success"><h6>Paid Orders</h6><h4>${cn.paid || 0}</h4></div></div><div class="col-6 col-md-3"><div class="stat-card bg-warning"><h6>Avg Order</h6><h4>${fmt(d.averageOrderValue)}</h4></div></div><div class="col-6 col-md-3"><div class="stat-card bg-info"><h6>Items Sold</h6><h4>${t.items || 0}</h4></div></div></div>`;
+  $('reportSummary').innerHTML = `
+    <div class="row g-2 mb-2">
+      <div class="col-6 col-md-3"><div class="stat-card bg-primary"><h6>Net Sales</h6><h4>${fmt(t.sales)}</h4></div></div>
+      <div class="col-6 col-md-3"><div class="stat-card bg-success"><h6>Paid Orders</h6><h4>${cn.paid || 0}</h4></div></div>
+      <div class="col-6 col-md-3"><div class="stat-card bg-warning"><h6>Avg Order</h6><h4>${fmt(d.averageOrderValue)}</h4></div></div>
+      <div class="col-6 col-md-3"><div class="stat-card bg-info"><h6>Items Sold</h6><h4>${t.items || 0}</h4></div></div>
+    </div>
+    <div class="d-flex flex-wrap gap-3 small text-muted border rounded p-2 bg-light">
+      <span>Gross Subtotal: <strong class="text-dark">${fmt(t.subtotal)}</strong></span>
+      <span>Discounts: <strong class="text-danger">-${fmt(t.discount)}</strong></span>
+      <span>Service Charge: <strong class="text-dark">${fmt(t.service)}</strong></span>
+      <span>VAT / Tax: <strong class="text-dark">${fmt(t.tax)}</strong></span>
+      <span>Cancelled/Void: <strong class="text-secondary">${cn.cancelled || 0}</strong></span>
+    </div>`;
 
   const brWrap = $('reportBranchComparison');
   if (brWrap) {
@@ -3730,14 +3924,45 @@ function renderSalesReport(d) {
     }
   }
 
-  $('reportTopItems').innerHTML = `<table class="table table-sm"><thead><tr><th>Item</th><th class="text-end">Qty</th><th class="text-end">Sales</th></tr></thead><tbody>${(d.topItems || []).map(i => `<tr><td>${escapeHtml(i.name)}</td><td class="text-end">${i.quantity}</td><td class="text-end">${fmt(i.sales)}</td></tr>`).join('')}</tbody></table>`;
-  $('reportDaily').innerHTML = `<table class="table table-sm"><thead><tr><th>Date</th><th class="text-end">Orders</th><th class="text-end">Net Sales</th></tr></thead><tbody>${(d.daily || []).map(dy => `<tr><td>${escapeHtml(dy.date)}</td><td class="text-end">${dy.orders}</td><td class="text-end fw-bold">${fmt(dy.sales)}</td></tr>`).join('')}</tbody></table>`;
-  $('reportOrders').innerHTML = `<table class="table table-sm"><thead><tr><th>Date</th>${d.allBranches ? '<th>Branch</th>' : ''}<th>Order #</th><th>Table</th><th>Method</th><th class="text-end">Total</th></tr></thead><tbody>${(d.orders || []).map(o => `<tr><td>${escapeHtml(o.date)}</td>${d.allBranches ? `<td><span class="badge bg-dark">${escapeHtml(o.branch)}</span></td>` : ''}<td>${escapeHtml(o.orderNumber)}</td><td>${escapeHtml(o.table)}</td><td>${escapeHtml(o.method)}</td><td class="text-end fw-bold">${fmt(o.total)}</td></tr>`).join('')}</tbody></table>`;
+  const pmWrap = $('reportPaymentMethods');
+  if (pmWrap) {
+    pmWrap.innerHTML = (d.paymentBreakdown || []).length ? `
+      <h6 class="fw-bold mt-2">Payment Method Breakdown</h6>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle">
+          <thead><tr><th>Payment Method</th><th class="text-end">Orders</th><th class="text-end">Net Sales</th><th class="text-end">Share</th></tr></thead>
+          <tbody>
+            ${d.paymentBreakdown.map(p => `<tr>
+              <td><strong>${escapeHtml(p.method)}</strong></td>
+              <td class="text-end">${p.orders}</td>
+              <td class="text-end fw-bold">${fmt(p.sales)}</td>
+              <td class="text-end"><span class="badge bg-secondary">${p.share}%</span></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : '';
+  }
+
+  $('reportTopItems').innerHTML = `<div class="table-responsive"><table class="table table-sm table-hover"><thead><tr><th>Item</th><th class="text-end">Qty</th><th class="text-end">Avg Price</th><th class="text-end">Sales</th><th class="text-end">Share</th></tr></thead><tbody>${(d.topItems || []).length ? d.topItems.map(i => `<tr><td>${escapeHtml(i.name)}</td><td class="text-end">${i.quantity}</td><td class="text-end">${fmt(i.avgPrice)}</td><td class="text-end fw-bold">${fmt(i.sales)}</td><td class="text-end">${i.share}%</td></tr>`).join('') : '<tr><td colspan="5" class="text-muted text-center">No items sold in this period.</td></tr>'}</tbody></table></div>`;
+  $('reportDaily').innerHTML = `<div class="table-responsive"><table class="table table-sm table-hover"><thead><tr><th>Date</th><th class="text-end">Orders</th><th class="text-end">Subtotal</th><th class="text-end">Discount</th><th class="text-end">Tax</th><th class="text-end">Net Sales</th></tr></thead><tbody>${(d.daily || []).length ? d.daily.map(dy => `<tr><td>${escapeHtml(dy.date)}</td><td class="text-end">${dy.orders}</td><td class="text-end">${fmt(dy.subtotal)}</td><td class="text-end text-danger">-${fmt(dy.discount)}</td><td class="text-end">${fmt(dy.tax)}</td><td class="text-end fw-bold">${fmt(dy.sales)}</td></tr>`).join('') : '<tr><td colspan="6" class="text-muted text-center">No daily sales data.</td></tr>'}</tbody></table></div>`;
+  $('reportOrders').innerHTML = `<div class="table-responsive"><table class="table table-sm table-hover"><thead><tr><th>Date</th><th>Time</th>${d.allBranches ? '<th>Branch</th>' : ''}<th>Order #</th><th>Table</th><th>Customer</th><th>Method</th><th class="text-end">Total</th></tr></thead><tbody>${(d.orders || []).length ? d.orders.map(o => `<tr><td>${escapeHtml(o.date)}</td><td class="small text-muted">${escapeHtml(o.time)}</td>${d.allBranches ? `<td><span class="badge bg-dark">${escapeHtml(o.branch)}</span></td>` : ''}<td><strong>${escapeHtml(o.orderNumber)}</strong></td><td>${escapeHtml(o.table)}</td><td>${escapeHtml(o.customer)}</td><td>${escapeHtml(o.method)}</td><td class="text-end fw-bold">${fmt(o.total)}</td></tr>`).join('') : `<tr><td colspan="${d.allBranches ? 8 : 7}" class="text-muted text-center">No orders found.</td></tr>`}</tbody></table></div>`;
+}
+function printSalesReport() {
+  if (!_lastSalesReport) return toast('Generate a sales report first.', 'warning');
+  const area = $('salesReportPrintArea');
+  if (!area) return;
+  const header = `<div style="margin-bottom:12px; border-bottom:2px solid #000; padding-bottom:6px;">
+    <h3 style="margin:0;">${escapeHtml(state.settings.RESTAURANT_NAME || 'Restaurant POS')} — Sales Report</h3>
+    <div style="font-size:12px;">Scope: ${_lastSalesReport.allBranches ? 'All Branches' : escapeHtml($('settingsBranchBadge')?.textContent || 'Current Branch')} | Printed: ${new Date().toLocaleString()}</div>
+  </div>`;
+  printHtmlDocument('Sales Report', header + area.innerHTML);
 }
 function exportSalesReportCsv() {
   const d = _lastSalesReport;
   if (!d || !(d.orders || []).length) return toast('Generate a report first.', 'warning');
-  const lines = ['Date,Branch,Order #,Table,Method,Total'].concat(d.orders.map(o => `${o.date},"${o.branch}",${o.orderNumber},${o.table},${o.method},${o.total}`));
+  const lines = ['Date,Time,Branch,Order #,Table,Customer,Method,Subtotal,Discount,Tax,Service,Total'].concat(
+    d.orders.map(o => `${o.date},${o.time},"${o.branch}",${o.orderNumber},${o.table},"${o.customer}","${o.method}",${o.subtotal.toFixed(2)},${o.discount.toFixed(2)},${o.tax.toFixed(2)},${o.service.toFixed(2)},${o.total.toFixed(2)}`)
+  );
   const link = document.createElement('a');
   link.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(lines.join('\r\n'));
   link.download = `sales_${d.allBranches ? 'all_branches_' : ''}${todayStr()}.csv`;
@@ -3747,6 +3972,16 @@ function exportSalesReportCsv() {
 function renderEODReportHtml(r) {
   const c = r.currency || '₱', fmt = n => c + Number(n || 0).toFixed(2);
   const row = (lbl, val, cls = '') => `<div style="display:flex; justify-content:space-between; margin-bottom:2px;" class="${cls}"><span>${lbl}</span><span>${val}</span></div>`;
+
+  const openBadge = $('eodOpenWarningBadge');
+  if (openBadge) {
+    if ((r.counts?.open || 0) > 0) {
+      openBadge.style.display = 'inline-block';
+      openBadge.textContent = `${r.counts.open} Open/Unpaid Order(s)`;
+    } else {
+      openBadge.style.display = 'none';
+    }
+  }
 
   const paymentRows = (r.paymentBreakdown || []).length
     ? r.paymentBreakdown.map(p => row(`${escapeHtml(p.method)} (${p.count})`, fmt(p.total))).join('')
@@ -3843,6 +4078,24 @@ function renderEODReportHtml(r) {
     </div>`;
 }
 
+async function loadEodHistory() {
+  const tbody = $('eodHistoryBody');
+  if (!tbody) return;
+  try {
+    const rows = await callServer('getEodHistory', state.token);
+    const c = curr(), fmt = n => c + Number(n || 0).toFixed(2);
+    tbody.innerHTML = rows.length ? rows.map(r => `<tr>
+      <td><strong>${escapeHtml(r.BusinessDate)}</strong></td>
+      <td class="small text-muted">${r.ClosedAt ? new Date(r.ClosedAt).toLocaleString() : '—'}</td>
+      <td class="text-end fw-bold text-success">${fmt(r.CashSales)}</td>
+      <td class="text-end text-danger">-${fmt(r.SeniorPwdDiscounts)}</td>
+      <td class="text-end">${fmt(r.VatableSales)}</td>
+      <td class="text-end">${fmt(r.VatExemptSales)}</td>
+      <td class="text-end">${fmt(r.VatAmount)}</td>
+    </tr>`).join('') : '<tr><td colspan="7" class="text-muted small text-center py-2">No previous Z-Reading closings recorded for this branch.</td></tr>';
+  } catch (e) {}
+}
+
 async function loadEODReport() {
   try {
     const dateVal = $('eodDate').value || todayStr();
@@ -3855,6 +4108,7 @@ async function loadEODReport() {
     window._lastEOD = r;
     state.eodGenerated = { branchId: state.activeBranchId || 'branch-main', date: dateVal };
     renderEODReportHtml(r);
+    loadEodHistory();
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
@@ -3870,12 +4124,17 @@ async function closePOS() {
   if (!state.eodGenerated || state.eodGenerated.date !== dateVal || state.eodGenerated.branchId !== currentBranch) {
     return showModal('eodRequiredModal');
   }
-  if (!confirm(`Close POS for ${dateVal} on current branch?`)) return;
+  const openCount = Number(window._lastEOD?.counts?.open || 0);
+  if (openCount > 0) {
+    if (!confirm(`Warning: There are still ${openCount} open/unpaid order(s) on ${dateVal}. Close POS anyway?`)) return;
+  } else {
+    if (!confirm(`Close POS for ${dateVal} on current branch?`)) return;
+  }
   try {
     showLoading('Closing POS & archiving Z-Reading…');
     const res = await callServer('archiveAndResetPOS', state.token, dateVal);
     state.eodGenerated = null;
-    showDone(res.message, () => { loadBootstrap(); poll(true); });
+    showDone(res.message, () => { loadBootstrap(); poll(true); loadEodHistory(); });
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
