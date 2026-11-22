@@ -9,6 +9,9 @@
   <style>
     :root { --pos-dark: #1e293b; --pos-accent: #f59e0b; }
     body { background-color: #f1f5f9; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+    /* FIX: Bootstrap's .d-flex uses display:flex !important, which blocked style.display='none'.
+       The login screen now gets its flex display from a normal (non-important) rule instead. */
+    #loginScreen { display: flex; }
     .navbar-pos { background-color: var(--pos-dark); box-shadow: 0 2px 10px rgba(0,0,0,0.15); }
     .card-pos { border: none; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); transition: transform 0.15s ease, box-shadow 0.15s ease; }
     .table-card { cursor: pointer; border-top: 5px solid #22c55e; user-select: none; }
@@ -34,7 +37,7 @@
 <body>
 
 <!-- LOGIN SCREEN -->
-<div id="loginScreen" class="min-vh-100 d-flex align-items-center justify-content-center p-3" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);">
+<div id="loginScreen" class="min-vh-100 align-items-center justify-content-center p-3" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);">
   <div class="card card-pos p-4 p-md-5" style="max-width: 420px; width: 100%;">
     <div class="text-center mb-4">
       <div class="bg-warning text-dark rounded-circle d-inline-flex align-items-center justify-content-center mb-2" style="width: 60px; height: 60px; font-size: 1.6rem;">
@@ -774,7 +777,7 @@
 /* ============================================================
    SUPABASE CONFIGURATION (Loaded from config.js or localStorage)
    ============================================================ */
-const APP_VERSION = 'v2.4.0';
+const APP_VERSION = 'v2.4.1';
 const RUNTIME_CFG = window.POS_CONFIG || {};
 const SUPABASE_URL = (
   RUNTIME_CFG.SUPABASE_URL ||
@@ -2069,17 +2072,24 @@ async function resumeSession() {
 }
 
 async function initSession() {
+  /* FIX: hide the login screen first. With #loginScreen no longer using Bootstrap's
+     !important .d-flex class, this inline display:none now takes effect. */
   $('loginScreen').style.display = 'none';
   $('appLayout').style.display = 'block';
   $('userDisplayName').textContent = `${state.user.fullName} (${state.user.role})`;
 
-  await restoreCache();
-  applyRoleNav();
-  const allowed = allowedViews();
-  switchView(allowed[0] || 'counter');
-  await loadBootstrap();
-  startRealtime();
-  startPolling();
+  try {
+    await restoreCache();
+    applyRoleNav();
+    const allowed = allowedViews();
+    switchView(allowed[0] || 'counter');
+    await loadBootstrap();
+    startRealtime();
+    startPolling();
+  } catch (err) {
+    console.error('initSession error:', err);
+    toast('Failed to initialize session: ' + err.message, 'danger');
+  }
 }
 
 function isKdsDisabled() {
@@ -3044,7 +3054,7 @@ async function submitOrder() {
   try {
     showLoading('Submitting order…');
     const r = await runAction('createOrder', [{ clientId: id, tableId, tableNumber, subtotal: gross, items: state.cart.map(i => ({ ...i })) }], id, 'New order');
-    showDone(`Order ${r.res.orderNumber} submitted!`, () => {
+    showDone(r.queued ? 'Order saved offline — will sync' : `Order ${r.res.orderNumber} submitted!`, () => {
       hideModal('orderModal');
       if (state.user && ['Counter', 'Manager', 'Admin'].includes(state.user.role)) switchView('counter');
       if (!r.queued) poll(true);
