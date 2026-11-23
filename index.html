@@ -7,16 +7,103 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <style>body{background-color:#f1f5f9;font-family:system-ui,-apple-system,sans-serif;} .login-bg{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);padding:1rem;} .sidebar{min-height:calc(100vh - 56px);background:#0f172a;color:#cbd5e1;padding-top:10px;} .sidebar .nav-link{color:#cbd5e1;padding:12px 20px;border-radius:8px;margin:2px 10px;font-weight:500;} .sidebar .nav-link:hover,.sidebar .nav-link.active{background:#1e293b;color:#f59e0b;} .sidebar .nav-link i{width:22px;} .mobile-bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:1030;background:#0f172a;display:flex;justify-content:space-around;padding:6px 0;border-top:1px solid #334155;} .mobile-bottom-nav .nav-link{color:#94a3b8;font-size:0.72rem;text-align:center;display:flex;flex-direction:column;align-items:center;padding:4px 8px;} .mobile-bottom-nav .nav-link.active{color:#f59e0b;font-weight:700;} .mobile-bottom-nav .nav-link i{font-size:1.15rem;margin-bottom:2px;} .card-pos{border:none;border-radius:12px;box-shadow:0 2px 8px rgba(15,23,42,0.06);transition:transform 0.12s ease,box-shadow 0.12s ease;} .table-card{border-top:5px solid #22c55e;cursor:pointer;} .table-card:hover{transform:translateY(-2px);box-shadow:0 6px 14px rgba(15,23,42,0.1);} .stat-card{border-radius:12px;padding:14px 16px;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,0.08);} .stat-card h6{font-size:0.75rem;text-transform:uppercase;opacity:0.9;margin-bottom:4px;} .stat-card h3,.stat-card h4{font-weight:700;margin-bottom:0;} .kds-card.CONFIRMED_BY_COUNTER{border-left:6px solid #f59e0b;} .kds-card.ACCEPTED_BY_KITCHEN{border-left:6px solid #0dcaf0;} .kds-card.PREPARING{border-left:6px solid #0d6efd;} .eta-countdown{font-weight:700;color:#0d6efd;} .eta-countdown.late{color:#dc3545;animation:pulse 1s infinite;} @keyframes pulse{50%{opacity:0.5;}} #loadingOverlay{position:fixed;inset:0;background:rgba(15,23,42,0.78);z-index:2000;display:none;flex-direction:column;align-items:center;justify-content:center;color:#fff;} .done-checkmark{font-size:3.2rem;color:#22c55e;} .toast-container{position:fixed;top:68px;right:16px;z-index:2100;} .offline-banner{display:none;background:#dc2626;color:#fff;text-align:center;padding:6px;font-weight:600;font-size:0.85rem;} .sync-indicator{font-size:0.78rem;color:#cbd5e1;} .nav-section-title{font-size:0.7rem;text-transform:uppercase;letter-spacing:1px;color:#64748b;padding:12px 20px 4px;} .receipt-preview{font-family:'Courier New',Courier,monospace;max-width:340px;margin:0 auto;padding:15px;border:1px dashed #ccc;background:#fff;color:#000;} .img-preview-thumb{width:48px;height:48px;object-fit:cover;border-radius:8px;border:1px solid #cbd5e1;background:#e2e8f0;} .category-tabs-container::-webkit-scrollbar{display:none;} .category-tabs-container{-ms-overflow-style:none;scrollbar-width:none;} @media (max-width:767.98px){.main-content-area{padding-bottom:70px !important;} .modal-dialog{margin:0.5rem;}} button,.btn,.nav-link,.card-pos,.table-card{touch-action:manipulation;-webkit-tap-highlight-color:transparent;}</style>
+  <!-- Optional git-ignored config.js for pre-configuring Supabase URL & Anon Key -->
+  <script src="config.js" onerror="window.POS_CONFIG = window.POS_CONFIG || {};"></script>
+  <style>
+    body { background-color: #f1f5f9; font-family: system-ui, -apple-system, sans-serif; }
+    .login-bg {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 1rem;
+    }
+    .sidebar {
+      min-height: calc(100vh - 56px); background: #0f172a; color: #cbd5e1; padding-top: 10px;
+    }
+    .sidebar .nav-link {
+      color: #cbd5e1; padding: 12px 20px; border-radius: 8px; margin: 2px 10px; font-weight: 500;
+    }
+    .sidebar .nav-link:hover, .sidebar .nav-link.active {
+      background: #1e293b; color: #f59e0b;
+    }
+    .sidebar .nav-link i { width: 22px; }
+    .mobile-bottom-nav {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 1030;
+      background: #0f172a; display: flex; justify-content: space-around;
+      padding: 6px 0; border-top: 1px solid #334155;
+    }
+    .mobile-bottom-nav .nav-link {
+      color: #94a3b8; font-size: 0.72rem; text-align: center;
+      display: flex; flex-direction: column; align-items: center; padding: 4px 8px;
+    }
+    .mobile-bottom-nav .nav-link.active { color: #f59e0b; font-weight: 700; }
+    .mobile-bottom-nav .nav-link i { font-size: 1.15rem; margin-bottom: 2px; }
+    .card-pos {
+      border: none; border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+      transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+    .table-card {
+      border-top: 5px solid #22c55e; cursor: pointer;
+    }
+    .table-card:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(15, 23, 42, 0.1); }
+    .stat-card {
+      border-radius: 12px; padding: 14px 16px; color: #fff;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    }
+    .stat-card h6 { font-size: 0.75rem; text-transform: uppercase; opacity: 0.9; margin-bottom: 4px; }
+    .stat-card h3, .stat-card h4 { font-weight: 700; margin-bottom: 0; }
+    .kds-card.CONFIRMED_BY_COUNTER { border-left: 6px solid #f59e0b; }
+    .kds-card.ACCEPTED_BY_KITCHEN { border-left: 6px solid #0dcaf0; }
+    .kds-card.PREPARING { border-left: 6px solid #0d6efd; }
+    .eta-countdown { font-weight: 700; color: #0d6efd; }
+    .eta-countdown.late { color: #dc3545; animation: pulse 1s infinite; }
+    @keyframes pulse { 50% { opacity: 0.5; } }
+    #loadingOverlay {
+      position: fixed; inset: 0; background: rgba(15, 23, 42, 0.78);
+      z-index: 2000; display: none; flex-direction: column;
+      align-items: center; justify-content: center; color: #fff;
+    }
+    .done-checkmark { font-size: 3.2rem; color: #22c55e; }
+    .toast-container { position: fixed; top: 68px; right: 16px; z-index: 2100; }
+    .offline-banner {
+      display: none; background: #dc2626; color: #fff;
+      text-align: center; padding: 6px; font-weight: 600; font-size: 0.85rem;
+    }
+    .sync-indicator { font-size: 0.78rem; color: #cbd5e1; }
+    .nav-section-title {
+      font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px;
+      color: #64748b; padding: 12px 20px 4px;
+    }
+    .receipt-preview {
+      font-family: 'Courier New', Courier, monospace;
+      max-width: 340px; margin: 0 auto; padding: 15px;
+      border: 1px dashed #ccc; background: #fff; color: #000;
+    }
+    .img-preview-thumb {
+      width: 48px; height: 48px; object-fit: cover;
+      border-radius: 8px; border: 1px solid #cbd5e1; background: #e2e8f0;
+    }
+    .category-tabs-container::-webkit-scrollbar { display: none; }
+    .category-tabs-container { -ms-overflow-style: none; scrollbar-width: none; }
+    @media (max-width: 767.98px) {
+      .main-content-area { padding-bottom: 70px !important; }
+      .modal-dialog { margin: 0.5rem; }
+    }
+    button, .btn, .nav-link, .card-pos, .table-card {
+      touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    }
+  </style>
 </head>
 <body>
+
 <div id="loadingOverlay">
   <div id="loadingSpinner" class="spinner-border text-warning mb-3" style="width:3rem;height:3rem;"></div>
   <div id="doneIcon" class="done-checkmark mb-2" style="display:none;"><i class="fa-solid fa-circle-check"></i></div>
   <h4 id="overlayText" class="fw-bold">Processing...</h4>
 </div>
+
 <div class="toast-container" id="toastContainer"></div>
 <div class="offline-banner" id="offlineBanner"><i class="fa-solid fa-wifi me-2"></i>Offline — reconnecting…</div>
+
 <!-- LOGIN SCREEN -->
 <div id="loginScreen" class="login-bg">
   <div class="card card-pos p-4" style="width: 100%; max-width: 400px;">
@@ -48,6 +135,7 @@
     </div>
   </div>
 </div>
+
 <!-- MAIN APP LAYOUT -->
 <div id="appLayout" style="display:none;">
   <nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top">
@@ -56,9 +144,11 @@
       <div class="ms-auto d-flex align-items-center gap-2 gap-md-3 text-light">
         <div id="branchSwitcherWrap" class="d-flex align-items-center gap-1"></div>
         <span class="sync-indicator d-none d-sm-inline" id="syncStatus"><i class="fa-solid fa-bolt text-warning me-1"></i>Connecting Realtime…</span>
+
         <button class="btn btn-outline-warning btn-sm fw-bold" onclick="openHelpModal()">
           <i class="fa-solid fa-circle-question me-1"></i><span class="d-none d-sm-inline">Help &amp; Guide</span>
         </button>
+
         <div class="dropdown">
           <button class="btn btn-outline-light btn-sm dropdown-toggle" data-bs-toggle="dropdown">
             <i class="fa-solid fa-user me-1"></i><span id="userDisplayName"></span>
@@ -73,6 +163,7 @@
       </div>
     </div>
   </nav>
+
   <div class="container-fluid">
     <div class="row">
       <!-- Desktop Sidebar -->
@@ -86,8 +177,10 @@
           <a href="#" class="nav-link" data-view="admin"><i class="fa-solid fa-sliders"></i> Admin Setting</a>
         </div>
       </div>
+
       <!-- Main View Container -->
       <div class="col-md-10 p-3 p-md-4 main-content-area">
+
         <!-- DASHBOARD -->
         <div id="view-waiter" class="spa-view" style="display:none;">
           <div class="d-flex justify-content-between align-items-center mb-3">
@@ -123,6 +216,7 @@
             </div>
           </div>
         </div>
+
         <!-- COUNTER VIEW -->
         <div id="view-counter" class="spa-view" style="display:none;">
           <div class="d-flex justify-content-between align-items-center mb-3">
@@ -143,6 +237,7 @@
           </div>
           <div class="row g-2 g-md-3 mb-4" id="counterStats"></div>
           <div class="row g-2 g-md-3 mb-4" id="counterQueue"></div>
+
           <!-- COUNTER ORDER LIST TABLE (MANAGER & ADMIN CAN EDIT / REFUND ITEMS) -->
           <div class="card card-pos p-3">
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
@@ -174,6 +269,7 @@
             </div>
           </div>
         </div>
+
         <!-- KITCHEN VIEW -->
         <div id="view-kitchen" class="spa-view" style="display:none;">
           <div class="d-flex justify-content-between align-items-center mb-3">
@@ -182,6 +278,7 @@
           </div>
           <div class="row g-2 g-md-3" id="kdsGrid"></div>
         </div>
+
         <!-- ADMIN SETTING VIEW -->
         <div id="view-admin" class="spa-view" style="display:none;">
           <h3 class="fw-bold mb-3"><i class="fa-solid fa-sliders text-secondary me-2"></i>Admin Setting</h3>
@@ -191,6 +288,7 @@
             <div class="col-6 col-md-3"><div class="stat-card bg-warning"><h6>Avg Order Value</h6><h3 id="statAvg">₱0.00</h3></div></div>
             <div class="col-6 col-md-3"><div class="stat-card bg-info"><h6>Tax Collected</h6><h3 id="statTax">₱0.00</h3></div></div>
           </div>
+
           <div class="overflow-x-auto mb-3">
             <ul class="nav nav-tabs flex-nowrap" role="tablist">
               <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabSettings">Settings</button></li>
@@ -204,6 +302,7 @@
               <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabEOD">End of Day &amp; Maintenance</button></li>
             </ul>
           </div>
+
           <div class="tab-content">
             <!-- SETTINGS TAB -->
             <div class="tab-pane fade show active" id="tabSettings">
@@ -272,6 +371,7 @@
                 </form>
               </div>
             </div>
+
             <!-- BRANCHES TAB -->
             <div class="tab-pane fade" id="tabBranches">
               <div class="card card-pos p-3">
@@ -297,6 +397,7 @@
                 </div>
               </div>
             </div>
+
             <!-- MENU TAB -->
             <div class="tab-pane fade" id="tabMenu">
               <div class="card card-pos p-3">
@@ -358,6 +459,7 @@
                     <button type="submit" class="btn btn-warning fw-bold px-4"><i class="fa-solid fa-floppy-disk me-1"></i>Save Menu Item</button>
                   </div>
                 </form>
+
                 <div class="border-top pt-3 mb-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
                   <div class="d-flex align-items-center gap-2">
                     <h6 class="text-muted mb-0">Existing Menu Items (Current Branch)</h6>
@@ -380,6 +482,7 @@
                     </select>
                   </div>
                 </div>
+
                 <div class="table-responsive">
                   <table class="table table-sm table-hover align-middle">
                     <thead>
@@ -398,6 +501,7 @@
                 </div>
               </div>
             </div>
+
             <!-- TABLES TAB -->
             <div class="tab-pane fade" id="tabTables">
               <div class="card card-pos p-3">
@@ -422,6 +526,7 @@
                 </div>
               </div>
             </div>
+
             <!-- CATEGORIES TAB -->
             <div class="tab-pane fade" id="tabCategories">
               <div class="card card-pos p-3">
@@ -445,6 +550,7 @@
                 <div id="categoriesList"></div>
               </div>
             </div>
+
             <!-- USERS TAB -->
             <div class="tab-pane fade" id="tabUsers">
               <div class="card card-pos p-3">
@@ -474,6 +580,7 @@
                 </div>
               </div>
             </div>
+
             <!-- ACTIVITY LOG TAB (ADMIN ONLY) -->
             <div class="tab-pane fade" id="tabLogs">
               <div class="card card-pos p-3">
@@ -489,6 +596,7 @@
                 </div>
               </div>
             </div>
+
             <!-- SALES REPORT TAB -->
             <div class="tab-pane fade" id="tabReports">
               <div class="card card-pos p-3">
@@ -533,6 +641,7 @@
                 </div>
               </div>
             </div>
+
             <!-- END OF DAY & Z-READING TAB -->
             <div class="tab-pane fade" id="tabEOD">
               <div class="card card-pos p-3 mb-4">
@@ -567,6 +676,7 @@
                 </div>
                 <div id="eodReport"></div>
               </div>
+
               <div class="card card-pos p-3 mb-4">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h6 class="fw-bold mb-0"><i class="fa-solid fa-clock-rotate-left text-primary me-2"></i>Recent Z-Reading Closings (Current Branch)</h6>
@@ -591,6 +701,7 @@
                   </table>
                 </div>
               </div>
+
               <div class="card card-pos p-3">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h6 class="fw-bold mb-0"><i class="fa-solid fa-file-zipper text-info me-2"></i>Download JSON / CSV Archive</h6>
@@ -603,9 +714,11 @@
             </div>
           </div>
         </div>
+
       </div>
     </div>
   </div>
+
   <div class="mobile-bottom-nav d-md-none navMenu">
     <a href="#" class="nav-link" data-view="waiter"><i class="fa-solid fa-gauge-high"></i><span>Dashboard</span></a>
     <a href="#" class="nav-link" data-view="counter"><i class="fa-solid fa-receipt"></i><span>Counter</span></a>
@@ -613,6 +726,7 @@
     <a href="#" class="nav-link" data-view="admin"><i class="fa-solid fa-sliders"></i><span>Admin Setting</span></a>
   </div>
 </div>
+
 <!-- SERVE ITEMS CHECKLIST MODAL (WITH EDITABLE SERVED QUANTITY) -->
 <div class="modal fade" id="serveChecklistModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
@@ -644,6 +758,7 @@
     </div>
   </div>
 </div>
+
 <!-- COUNTER EDIT / REFUND ORDER MODAL (MANAGER & ADMIN ONLY) -->
 <div class="modal fade" id="counterEditOrderModal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
@@ -665,6 +780,7 @@
             <div class="small text-muted mt-1">Current Total: <strong id="editRefundCurrentTotal" class="text-danger">₱0.00</strong></div>
           </div>
         </div>
+
         <h6 class="fw-bold mb-2">Order Items — Select Quantity to Refund / Remove</h6>
         <div class="table-responsive mb-3">
           <table class="table table-sm table-bordered align-middle mb-0">
@@ -680,6 +796,7 @@
             <tbody id="editRefundItemsBody"></tbody>
           </table>
         </div>
+
         <div class="row g-2 mb-3">
           <div class="col-md-7">
             <label class="form-label small fw-semibold">Refund / Edit Reason <span class="text-danger">*</span></label>
@@ -692,6 +809,7 @@
             </div>
           </div>
         </div>
+
         <div class="d-flex gap-2">
           <button type="button" class="btn btn-warning fw-bold flex-grow-1 py-2" onclick="submitCounterItemRefund()">
             <i class="fa-solid fa-rotate-left me-1"></i>Process Selected Item Refund
@@ -704,6 +822,7 @@
     </div>
   </div>
 </div>
+
 <!-- FORGOT / RESET PASSWORD MODAL -->
 <div class="modal fade" id="forgotPasswordModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
@@ -742,6 +861,7 @@
     </div>
   </div>
 </div>
+
 <!-- SUPABASE CONNECTION SETUP MODAL -->
 <div class="modal fade" id="dbConfigModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
@@ -752,7 +872,7 @@
       </div>
       <div class="modal-body">
         <p class="small text-muted mb-3">
-          Credentials are stored locally in this browser. Use the Supabase Project URL and anon/publishable key; never enter a service_role secret key here.
+          Credentials are stored locally on this browser only (or loaded from a git-ignored <code>config.js</code>) so no keys are committed to GitHub.
         </p>
         <div class="mb-3">
           <label class="form-label small fw-semibold">Supabase Project URL</label>
@@ -774,6 +894,7 @@
     </div>
   </div>
 </div>
+
 <!-- ORDER MODAL -->
 <div class="modal fade" id="orderModal" tabindex="-1">
   <div class="modal-dialog modal-xl modal-dialog-scrollable">
@@ -806,6 +927,7 @@
     </div>
   </div>
 </div>
+
 <!-- TRANSFER TABLE MODAL -->
 <div class="modal fade" id="transferTableModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
@@ -832,6 +954,7 @@
     </div>
   </div>
 </div>
+
 <!-- MERGE TABLES MODAL -->
 <div class="modal fade" id="mergeTablesModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
@@ -860,6 +983,7 @@
     </div>
   </div>
 </div>
+
 <!-- RESERVATION MODAL -->
 <div class="modal fade" id="reservationModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
@@ -899,6 +1023,7 @@
     </div>
   </div>
 </div>
+
 <!-- SYSTEM HELP MODAL -->
 <div class="modal fade" id="helpModal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
@@ -922,6 +1047,7 @@
     </div>
   </div>
 </div>
+
 <!-- PAYMENT MODAL (WITH HYBRID PAYMENT SUPPORT) -->
 <div class="modal fade" id="paymentModal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-centered">
@@ -938,6 +1064,7 @@
               <label class="form-label small fw-semibold">Customer Name (optional)</label>
               <input class="form-control form-control-sm" id="payCustomerName" placeholder="Customer Name">
             </div>
+
             <div class="card bg-light border p-2 mb-3">
               <div class="form-check form-switch mb-1">
                 <input class="form-check-input" type="checkbox" id="paySeniorPwdToggle" onchange="togglePaySeniorPwdUI()">
@@ -950,6 +1077,7 @@
                 <div class="form-text text-muted" style="font-size:0.75rem;">Applies <span id="paySeniorPctHelp">20</span>% discount on order subtotal.</div>
               </div>
             </div>
+
             <div class="d-flex gap-2 mb-3" id="payManualDiscountGroup">
               <div class="w-50">
                 <label class="form-label small fw-semibold">Discount (%)</label>
@@ -960,6 +1088,7 @@
                 <input class="form-control form-control-sm" id="payDiscountReason" placeholder="Discount reason">
               </div>
             </div>
+
             <div class="card bg-light border p-2 mb-3">
               <div class="form-check form-switch mb-1">
                 <input class="form-check-input" type="checkbox" id="payDeliveryToggle" onchange="togglePayDeliveryUI()">
@@ -978,6 +1107,7 @@
                 <div class="form-text text-muted" style="font-size:0.75rem;">Recorded as Delivery. Enter the delivery order # in Reference #.</div>
               </div>
             </div>
+
             <div class="border rounded p-3 bg-light">
               <div class="d-flex justify-content-between small mb-1"><span>Subtotal:</span><strong id="paySubtotalDisplay">₱0.00</strong></div>
               <div class="d-flex justify-content-between small mb-1 d-none" id="payLessVatRowDisplay"><span>Less: VAT-Exempt (<span id="payLessVatPct">12</span>%):</span><span id="payLessVatDisplay" class="text-danger">-₱0.00</span></div>
@@ -989,8 +1119,10 @@
               <div id="payVatInfoDisplay" class="small text-muted border-top mt-2 pt-2 d-none"></div>
             </div>
           </div>
+
           <div class="col-md-6 ps-md-3">
             <div class="mb-2"><label class="form-label fw-semibold small">Amount Due</label><input class="form-control form-control-lg fw-bold text-danger bg-light" id="payDue" readonly></div>
+
             <!-- HYBRID PAYMENT TOGGLE -->
             <div class="card bg-light border p-2 mb-2" id="payHybridCard">
               <div class="form-check form-switch mb-0">
@@ -1000,6 +1132,7 @@
                 </label>
               </div>
             </div>
+
             <!-- SINGLE PAYMENT FIELDS -->
             <div id="singlePaymentFields">
               <div class="mb-2"><label class="form-label fw-semibold small">Amount Received</label><input type="number" step="0.01" class="form-control form-control-lg fw-bold text-success" id="payReceived" placeholder="0.00" oninput="calcChange()"></div>
@@ -1017,6 +1150,7 @@
               </div>
               <div class="mb-3"><label class="form-label fw-semibold small">Reference # (optional)</label><input class="form-control" id="payRef" placeholder="e.g. GCash Ref # / Card Trace #"></div>
             </div>
+
             <!-- HYBRID PAYMENT FIELDS -->
             <div id="hybridPaymentFields" class="d-none border rounded p-2 bg-light mb-3">
               <div class="mb-2">
@@ -1052,6 +1186,7 @@
                 <strong id="payHybridChange" class="text-success">₱0.00</strong>
               </div>
             </div>
+
             <button class="btn btn-success w-100 fw-bold py-2 fs-6 shadow-sm" onclick="submitPayment()"><i class="fa-solid fa-check-circle me-1"></i>Confirm Payment</button>
           </div>
         </div>
@@ -1059,6 +1194,7 @@
     </div>
   </div>
 </div>
+
 <!-- RECEIPT PREVIEW MODAL -->
 <div class="modal fade" id="receiptModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
@@ -1075,6 +1211,7 @@
     </div>
   </div>
 </div>
+
 <!-- ORDER READY ALERT MODAL -->
 <div class="modal fade" id="orderReadyModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
@@ -1085,6 +1222,7 @@
     </div>
   </div>
 </div>
+
 <!-- EOD REQUIRED MODAL -->
 <div class="modal fade" id="eodRequiredModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
@@ -1098,6 +1236,7 @@
     </div>
   </div>
 </div>
+
 <!-- KITCHEN TICKET PREVIEW MODAL -->
 <div class="modal fade" id="kitchenTicketModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
@@ -1112,6 +1251,7 @@
     </div>
   </div>
 </div>
+
 <!-- CHANGE PASSWORD MODAL -->
 <div class="modal fade" id="changePwModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered">
@@ -1126,6 +1266,7 @@
     </div>
   </div>
 </div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 'use strict';
