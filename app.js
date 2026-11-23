@@ -114,7 +114,7 @@ function clearDbConfig() {
 /* ============================================================
    CONSTANTS & GLOBAL STATE
    ============================================================ */
-const APP_VERSION = 'v4.9.2-RT';
+const APP_VERSION = 'v4.9.7-RT';
 const KDS_STATUSES = ['CONFIRMED_BY_COUNTER', 'ACCEPTED_BY_KITCHEN', 'PREPARING'];
 const FOOD_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="150" height="150"><rect width="150" height="150" fill="#cccccc"/>' +
@@ -277,6 +277,24 @@ function resolveMenuPrice(m) {
   const raw = m.EffectivePrice ?? m.PriceOverride ?? m.Price ?? 0;
   const num = Number(raw);
   return Number.isFinite(num) ? num : 0;
+}
+
+function isManagerOrAdmin() {
+  return state.user && ['Manager', 'Admin'].includes(state.user.role);
+}
+
+function isGlobalAdmin() {
+  return state.user && state.user.role === 'Admin';
+}
+
+function getServedItemQty(it) {
+  const totalQty = Number(it.Quantity || it.Qty || 1);
+  if (it.ServedQty !== undefined && it.ServedQty !== null && !isNaN(Number(it.ServedQty))) {
+    return Math.min(totalQty, Math.max(0, Number(it.ServedQty)));
+  }
+  const m = String(it.KitchenStatus || '').match(/^Partial\s+(\d+)\/(\d+)$/i);
+  if (m) return Math.min(totalQty, Math.max(0, parseInt(m[1], 10)));
+  return it.Status === 'SERVED' ? totalQty : 0;
 }
 
 function showLoading(msg) {
@@ -516,12 +534,147 @@ async function callServer(fnName, ...args) {
         await sbClient.from('orders').update({ OrderStatus: 'READY' }).eq('OrderID', orderId);
         if (o.TableID) await sbClient.from('restaurant_tables').update({ Status: 'Ready to Serve' }).eq('TableID', o.TableID);
       } else if (action === 'SERVE') {
-        const nextStatus = o.PaymentStatus === 'PAID' ? 'COMPLETED' : 'SERVED';
-        await sbClient.from('orders').update({ OrderStatus: nextStatus, Status: nextStatus === 'COMPLETED' ? 'Paid' : 'Open' }).eq('OrderID', orderId);
-        if (o.TableID) await sbClient.from('restaurant_tables').update({ Status: 'Needs Cleaning', CurrentOrderID: null }).eq('TableID', o.TableID);
+        const itemUpdates = Array.isArray(params.itemUpdates) ? params.itemUpdates : null;
+        if (itemUpdates !== null) {
+          const { data: orderItems } = await sbClient.from('order_items').select('*').eq('OrderID', orderId);
+          const updMap = {};
+          itemUpdates.forEach(u => { updMap[u.orderItemId] = Math.max(0, parseInt(u.servedQty, 10) || 0); });
+
+          let allFullyServed = (orderItems || []).length > 0;
+          for (const it of (orderItems || [])) {
+            const totalQty = Number(it.Quantity || it.Qty || 1);
+            const servedQty = Math.min(totalQty, updMap[it.OrderItemID] ?? 0);
+            const isFull = servedQty >= totalQty;
+            if (!isFull) allFullyServed = false;
+            const statusStr = isFull ? 'SERVED' : 'PREPARING';
+            const kStatusStr = isFull ? 'Served' : (servedQty > 0 ? `Partial ${servedQty}/${totalQty}` : 'Preparing');
+            await sbClient.from('order_items').update({
+              Status: statusStr,
+              KitchenStatus: kStatusStr
+            }).eq('OrderItemID', it.OrderItemID);
+          }
+
+          const nextStatus = allFullyServed ? 'SERVED' : 'PREPARING';
+          await sbClient.from('orders').update({
+            OrderStatus: nextStatus,
+            Status: o.PaymentStatus === 'PAID' ? 'Paid' : 'Open'
+          }).eq('OrderID', orderId);
+
+          if (o.TableID) {
+            await sbClient.from('restaurant_tables').update({
+              Status: allFullyServed ? 'Served' : 'Preparing',
+              CurrentOrderID: orderId
+            }).eq('TableID', o.TableID);
+          }
+        } else {
+          await sbClient.from('orders').update({
+            OrderStatus: 'SERVED',
+            Status: o.PaymentStatus === 'PAID' ? 'Paid' : 'Open'
+          }).eq('OrderID', orderId);
+          if (o.TableID) {
+            await sbClient.from('restaurant_tables').update({ Status: 'Served', CurrentOrderID: orderId }).eq('TableID', o.TableID);
+          }
+        }
       }
-      await logActivity(action, 'Order', orderId, JSON.stringify(params));
+      await logActivity(action, 'Order', orderId, `${o.OrderNumber} | ${JSON.stringify(params)}`);
       return { success: true };
+    }
+    case 'refundOrderItems': {
+      const [, p] = args;
+      if (!isManagerOrAdmin()) {
+        throw new Error('Only a Manager or Admin can edit or refund counter orders.');
+      }
+      const { orderId, refunds, reason, fullVoid } = p;
+      const { data: o } = await sbClient.from('orders').select('*').eq('OrderID', orderId).single();
+      if (!o) throw new Error('Order not found.');
+      const { data: items } = await sbClient.from('order_items').select('*').eq('OrderID', orderId);
+
+      if (fullVoid) {
+        const voidAmt = Number(o.GrandTotal || o.Subtotal || 0);
+        await sbClient.from('orders').update({
+          OrderStatus: 'VOIDED',
+          Status: 'Voided',
+          PaymentStatus: o.PaymentStatus === 'PAID' ? 'REFUNDED' : 'UNPAID',
+          DiscountReason: `FULL REFUND/VOID (${state.user.fullName}): ${reason}`
+        }).eq('OrderID', orderId);
+        if (o.TableID) {
+          await sbClient.from('restaurant_tables').update({ Status: 'Available', CurrentOrderID: null }).eq('TableID', o.TableID);
+        }
+        await logActivity('FULL_ORDER_REFUND', 'Order', orderId, `${o.OrderNumber} | Refunded ${curr()}${voidAmt.toFixed(2)} | Reason: ${reason} | By: ${state.user.fullName}`);
+        return { success: true, message: `Order ${o.OrderNumber} refunded & voided.` };
+      }
+
+      let refundedSubtotal = 0;
+      const refundedItemLabels = [];
+      const refundMap = {};
+      (refunds || []).forEach(r => { refundMap[r.orderItemId] = parseInt(r.refundQty, 10) || 0; });
+
+      for (const it of (items || [])) {
+        const curQty = Number(it.Quantity || it.Qty || 0);
+        const unitPrice = Number(it.UnitPriceSnapshot || it.UnitPrice || 0);
+        const itemName = it.ItemNameSnapshot || it.ItemName || 'Item';
+        const rQty = Math.min(curQty, Math.max(0, refundMap[it.OrderItemID] || 0));
+        if (rQty > 0) {
+          refundedSubtotal += rQty * unitPrice;
+          refundedItemLabels.push(`${rQty}x ${itemName}`);
+          const remQty = curQty - rQty;
+          if (remQty <= 0) {
+            await sbClient.from('order_items').delete().eq('OrderItemID', it.OrderItemID);
+          } else {
+            await sbClient.from('order_items').update({
+              Qty: remQty,
+              Quantity: remQty,
+              LineTotal: remQty * unitPrice
+            }).eq('OrderItemID', it.OrderItemID);
+          }
+        }
+      }
+
+      const itemsSummaryTxt = refundedItemLabels.join(', ');
+      const { data: remainingItems } = await sbClient.from('order_items').select('*').eq('OrderID', orderId);
+      if (!remainingItems || remainingItems.length === 0) {
+        await sbClient.from('orders').update({
+          Subtotal: 0,
+          GrandTotal: 0,
+          OrderStatus: 'VOIDED',
+          Status: 'Voided',
+          PaymentStatus: o.PaymentStatus === 'PAID' ? 'REFUNDED' : 'UNPAID',
+          DiscountReason: `ALL ITEMS REFUNDED (${state.user.fullName}): ${reason}`
+        }).eq('OrderID', orderId);
+        if (o.TableID) {
+          await sbClient.from('restaurant_tables').update({ Status: 'Available', CurrentOrderID: null }).eq('TableID', o.TableID);
+        }
+        await logActivity('ITEM_REFUND_VOID', 'Order', orderId, `${o.OrderNumber} | Items: ${itemsSummaryTxt} | Refunded ${curr()}${refundedSubtotal.toFixed(2)} | Reason: ${reason} | By: ${state.user.fullName}`);
+        return { success: true, message: `All items refunded. Order ${o.OrderNumber} closed.` };
+      }
+
+      const newSub = remainingItems.reduce((s, it) => s + (Number(it.Quantity || it.Qty || 0) * Number(it.UnitPriceSnapshot || it.UnitPrice || 0)), 0);
+      const isSeniorPwd = o.DiscountType === 'Senior/PWD';
+      const oldSub = Number(o.Subtotal || 0);
+      const manualPct = (!isSeniorPwd && oldSub > 0 && Number(o.Discount || 0) > 0)
+        ? Math.min(50, (Number(o.Discount || 0) / oldSub) * 100)
+        : 0;
+      const t = computeTotals(newSub, isSeniorPwd, manualPct);
+
+      const newPaid = o.PaymentStatus === 'PAID' ? Math.min(Number(o.AmountPaid || t.total), t.total) : Number(o.AmountPaid || 0);
+      const notePrefix = o.DiscountReason ? `${o.DiscountReason} | ` : '';
+      await sbClient.from('orders').update({
+        Subtotal: t.subtotal,
+        Discount: t.discount,
+        DiscountAmount: t.discount,
+        DiscountReason: `${notePrefix}Item Refund (${curr()}${refundedSubtotal.toFixed(2)} - ${itemsSummaryTxt}): ${reason}`,
+        LessVat: t.lessVat,
+        VatableSales: t.vatableSales,
+        VatExemptSales: t.vatExemptSales,
+        Tax: t.tax,
+        VatAmount: t.tax,
+        ServiceCharge: t.srv,
+        GrandTotal: t.total,
+        AmountPaid: newPaid
+      }).eq('OrderID', orderId);
+
+      await logActivity('ITEM_REFUND', 'Order', orderId, `${o.OrderNumber} | Items: ${itemsSummaryTxt} | Refunded ${curr()}${refundedSubtotal.toFixed(2)} | Reason: ${reason} | By: ${state.user.fullName}`);
+      return { success: true, message: `Refunded ${curr()}${refundedSubtotal.toFixed(2)} on ${o.OrderNumber}.` };
     }
     case 'processPayment': {
       const [, p] = args;
@@ -529,10 +682,12 @@ async function callServer(fnName, ...args) {
       if (!o) throw new Error('Order not found');
       const t = p.computedTotals || {};
       const totalDue = Number(t.total ?? o.GrandTotal ?? 0);
-      const changeAmount = Math.max(0, Number(p.amountReceived || 0) - totalDue);
+      const changeAmount = p.changeAmount !== undefined
+        ? Number(p.changeAmount)
+        : Math.max(0, Number(p.amountReceived || 0) - totalDue);
       const nextOrderStatus = o.OrderStatus === 'PENDING_COUNTER'
         ? (isKdsDisabled() ? 'READY' : 'CONFIRMED_BY_COUNTER')
-        : (o.OrderStatus === 'SERVED' ? 'COMPLETED' : o.OrderStatus);
+        : (o.OrderStatus === 'SERVED' ? 'SERVED' : o.OrderStatus);
 
       const { error } = await sbClient.from('orders').update({
         CustomerName: p.customerName || 'Walk-In Customer',
@@ -567,7 +722,7 @@ async function callServer(fnName, ...args) {
       if (o.TableID && o.OrderStatus === 'PENDING_COUNTER') {
         await sbClient.from('restaurant_tables').update({ Status: isKdsDisabled() ? 'Ready to Serve' : 'Occupied' }).eq('TableID', o.TableID);
       }
-      await logActivity('PAYMENT', 'Order', p.orderId, `${p.paymentMethod} ${totalDue.toFixed(2)}`);
+      await logActivity('PAYMENT', 'Order', p.orderId, `${o.OrderNumber} | ${p.paymentMethod} ${curr()}${totalDue.toFixed(2)}`);
       return { success: true, changeAmount };
     }
     case 'getReceiptData': {
@@ -592,6 +747,7 @@ async function callServer(fnName, ...args) {
     case 'cleanTable': {
       const [, tableId] = args;
       await sbClient.from('restaurant_tables').update({ Status: 'Available', CurrentOrderID: null, ReservedFor: null }).eq('TableID', tableId);
+      await logActivity('CLEAN_TABLE', 'Table', tableId, 'Marked table Available');
       return { success: true, message: 'Table is now Available' };
     }
     case 'toggleTableReservation': {
@@ -600,6 +756,7 @@ async function callServer(fnName, ...args) {
         Status: isReserved ? 'Reserved' : 'Available',
         ReservedFor: isReserved ? (note || 'Reserved') : null
       }).eq('TableID', tableId);
+      await logActivity('RESERVE_TABLE', 'Table', tableId, isReserved ? `Reserved (${note || 'Reserved'})` : 'Cleared reservation');
       return { success: true, message: isReserved ? 'Table marked Reserved' : 'Reservation cleared' };
     }
     case 'transferReservation': {
@@ -607,15 +764,17 @@ async function callServer(fnName, ...args) {
       const { data: src } = await sbClient.from('restaurant_tables').select('ReservedFor').eq('TableID', fromId).single();
       await sbClient.from('restaurant_tables').update({ Status: 'Reserved', ReservedFor: src?.ReservedFor || 'Reserved' }).eq('TableID', toId);
       await sbClient.from('restaurant_tables').update({ Status: 'Available', ReservedFor: null }).eq('TableID', fromId);
+      await logActivity('TRANSFER_RESERVATION', 'Table', toId, `From ${fromId} to ${toId}`);
       return { success: true, message: 'Reservation transferred!' };
     }
     case 'transferTableOrder': {
       const [, orderId, newTableId, newTableNumber] = args;
-      const { data: o } = await sbClient.from('orders').select('TableID').eq('OrderID', orderId).single();
+      const { data: o } = await sbClient.from('orders').select('TableID, OrderNumber').eq('OrderID', orderId).single();
       const { data: oldTbl } = o?.TableID ? await sbClient.from('restaurant_tables').select('Status').eq('TableID', o.TableID).single() : { data: { Status: 'Occupied' } };
       await sbClient.from('orders').update({ TableID: newTableId, TableNumber: newTableNumber }).eq('OrderID', orderId);
       await sbClient.from('restaurant_tables').update({ Status: oldTbl?.Status || 'Occupied', CurrentOrderID: orderId }).eq('TableID', newTableId);
       if (o?.TableID) await sbClient.from('restaurant_tables').update({ Status: 'Available', CurrentOrderID: null }).eq('TableID', o.TableID);
+      await logActivity('TRANSFER_TABLE', 'Order', orderId, `${o?.OrderNumber || orderId} moved to ${newTableNumber}`);
       return { success: true, message: `Transferred to ${newTableNumber}` };
     }
     case 'mergeTableOrders': {
@@ -628,6 +787,7 @@ async function callServer(fnName, ...args) {
       await sbClient.from('orders').update({ Subtotal: newSub, GrandTotal: newSub }).eq('OrderID', tgtOrder.OrderID);
       await sbClient.from('orders').update({ OrderStatus: 'CANCELLED', Status: 'Cancelled', DiscountReason: `Merged into ${tgtOrder.OrderNumber}` }).eq('OrderID', srcOrder.OrderID);
       await sbClient.from('restaurant_tables').update({ Status: 'Available', CurrentOrderID: null }).eq('TableID', srcTableId);
+      await logActivity('MERGE_TABLES', 'Order', tgtOrder.OrderID, `Merged ${srcOrder.TableNumber} (${srcOrder.OrderNumber}) into ${tgtOrder.TableNumber} (${tgtOrder.OrderNumber})`);
       return { success: true, message: `Merged ${srcOrder.TableNumber} into ${tgtOrder.TableNumber}` };
     }
     case 'saveSystemSettings': {
@@ -731,25 +891,32 @@ async function callServer(fnName, ...args) {
       if (!t.TableID) payload.Status = 'Available';
       const { error } = await sbClient.from('restaurant_tables').upsert(payload);
       if (error) throw new Error(error.message);
+      await logActivity('SAVE_TABLE', 'Table', payload.TableID, `${t.TableNumber} (${payload.Capacity} seats)`);
       return { success: true };
     }
     case 'deleteTable': {
       const [, tableId] = args;
       const { error } = await sbClient.from('restaurant_tables').delete().eq('TableID', tableId);
       if (error) throw new Error(error.message);
+      await logActivity('DELETE_TABLE', 'Table', tableId, 'Deleted table');
       return { success: true, message: 'Table deleted' };
     }
     case 'saveCategory': {
       const [, c] = args;
-      const newCatId = uuid();
-      const { error } = await sbClient.from('categories').insert({
-        CategoryID: newCatId,
+      const isUpdate = Boolean(c.CategoryID);
+      const catId = c.CategoryID || uuid();
+      const sortOrder = c.SortOrder !== undefined && c.SortOrder !== null
+        ? parseInt(c.SortOrder, 10)
+        : ((state.categories.length || 0) + 1);
+      const { error } = await sbClient.from('categories').upsert({
+        CategoryID: catId,
         CategoryName: c.CategoryName,
         Description: c.Description || '',
-        SortOrder: (state.categories.length || 0) + 1
-      });
+        SortOrder: isNaN(sortOrder) ? 1 : sortOrder
+      }, { onConflict: 'CategoryID' });
       if (error) throw new Error(error.message);
-      return { success: true, CategoryID: newCatId };
+      await logActivity(isUpdate ? 'UPDATE_CATEGORY' : 'CREATE_CATEGORY', 'Category', catId, c.CategoryName);
+      return { success: true, CategoryID: catId };
     }
     case 'deleteCategory': {
       const [, catId] = args;
@@ -762,14 +929,14 @@ async function callServer(fnName, ...args) {
     }
     case 'saveUser': {
       const [, u] = args;
-      if (state.user?.role === 'Manager') {
+      if (!isGlobalAdmin()) {
         if (u.Role === 'Admin') {
-          throw new Error('Managers are not allowed to assign or create the Admin role.');
+          throw new Error('Only Admin users can assign or create the Admin role.');
         }
         if (u.UserID) {
           const existing = (state.users || []).find(x => String(x.UserID) === String(u.UserID));
           if (existing && existing.Role === 'Admin') {
-            throw new Error('Managers cannot edit Admin accounts.');
+            throw new Error('Non-Admin users cannot edit Admin accounts.');
           }
         }
       }
@@ -796,6 +963,7 @@ async function callServer(fnName, ...args) {
       }
       if (error) throw new Error(error.message);
       if (data && data.success === false) throw new Error(data.message || 'Unable to save user.');
+      await logActivity('SAVE_USER', 'User', u.Username, `${u.FullName} (${u.Role})`);
       return data;
     }
     case 'deleteUser': {
@@ -805,8 +973,8 @@ async function callServer(fnName, ...args) {
         throw new Error('You cannot delete your currently logged-in account.');
       }
       const targetUser = (state.users || []).find(u => String(u.UserID) === String(userId));
-      if (state.user?.role === 'Manager' && targetUser && targetUser.Role === 'Admin') {
-        throw new Error('Managers cannot delete Admin accounts.');
+      if (!isGlobalAdmin() && targetUser && targetUser.Role === 'Admin') {
+        throw new Error('Non-Admin users cannot delete Admin accounts.');
       }
       if (targetUser && String(targetUser.Username).toLowerCase() === 'admin') {
         throw new Error('The primary admin account cannot be deleted.');
@@ -835,24 +1003,35 @@ async function callServer(fnName, ...args) {
       return data;
     }
     case 'getActivityLog': {
+      if (!isGlobalAdmin()) return [];
       const { data } = await sbClient.from('activity_logs').select('*').order('Timestamp', { ascending: false }).limit(300);
       return data || [];
     }
     case 'getSalesReport': {
       const [, opts = {}] = args;
-      const allBranches = opts.allBranches === true && state.user?.role === 'Admin';
+      // Only Admin can view All Branches; non-Admin always sees their assigned Branch only
+      const allBranches = isGlobalAdmin() && (opts.allBranches === true);
       let oQuery = sbClient.from('orders').select('*');
       let iQuery = sbClient.from('order_items').select('*');
+      let lQuery = sbClient.from('activity_logs').select('*').in('Action', ['ITEM_REFUND', 'ITEM_REFUND_VOID', 'FULL_ORDER_REFUND', 'REJECT_COUNTER']);
+
       if (!allBranches) {
         oQuery = oQuery.eq('BranchID', bId);
         iQuery = iQuery.eq('BranchID', bId);
       }
-      if (opts.startDate) oQuery = oQuery.gte('CreatedAt', `${opts.startDate}T00:00:00`);
-      if (opts.endDate) oQuery = oQuery.lte('CreatedAt', `${opts.endDate}T23:59:59`);
+      if (opts.startDate) {
+        oQuery = oQuery.gte('CreatedAt', `${opts.startDate}T00:00:00`);
+        lQuery = lQuery.gte('Timestamp', `${opts.startDate}T00:00:00`);
+      }
+      if (opts.endDate) {
+        oQuery = oQuery.lte('CreatedAt', `${opts.endDate}T23:59:59`);
+        lQuery = lQuery.lte('Timestamp', `${opts.endDate}T23:59:59`);
+      }
 
-      const [{ data: allOrds }, { data: allItms }] = await Promise.all([
+      const [{ data: allOrds }, { data: allItms }, { data: refundLogs }] = await Promise.all([
         oQuery.order('CreatedAt', { ascending: false }),
-        iQuery
+        iQuery,
+        lQuery.order('Timestamp', { ascending: false }).limit(300)
       ]);
       const orders = allOrds || [];
       const paid = orders.filter(o => o.PaymentStatus === 'PAID');
@@ -880,6 +1059,56 @@ async function callServer(fnName, ...args) {
 
       const branchNameMap = {};
       (state.branches || []).forEach(b => { branchNameMap[b.BranchID] = `${b.BranchName} (${b.BranchCode})`; });
+
+      const userNameMap = {};
+      (state.users || []).forEach(u => { userNameMap[u.UserID] = `${u.FullName} (${u.Role})`; });
+
+      const orderByIdMap = {};
+      orders.forEach(o => { orderByIdMap[o.OrderID] = o; });
+
+      // Build comprehensive Edit Order / Item Refund & Void audit rows
+      const refundAuditRows = [];
+      const seenLogOrderIds = new Set();
+      (refundLogs || []).forEach(l => {
+        const linkedOrder = orderByIdMap[l.EntityID];
+        if (!allBranches && !linkedOrder) return;
+        if (l.EntityID) seenLogOrderIds.add(l.EntityID);
+        const dt = new Date(l.Timestamp);
+        const amtMatch = String(l.NewValue || '').match(/Refunded\s*[^\d.-]*([0-9]+(?:\.[0-9]+)?)/i);
+        const parsedAmt = amtMatch ? parseFloat(amtMatch[1]) : (linkedOrder ? Number(linkedOrder.GrandTotal || 0) : 0);
+        refundAuditRows.push({
+          dateTime: `${dt.toLocaleDateString()} ${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+          branch: linkedOrder ? (branchNameMap[linkedOrder.BranchID] || linkedOrder.BranchID || 'Main') : 'Current Branch',
+          orderNumber: linkedOrder ? linkedOrder.OrderNumber : (String(l.NewValue || '').split('|')[0]?.trim() || '—'),
+          table: linkedOrder ? (linkedOrder.TableNumber || 'Takeout') : '—',
+          action: l.Action,
+          amount: Number.isFinite(parsedAmt) ? parsedAmt : 0,
+          details: l.NewValue || linkedOrder?.DiscountReason || '—',
+          staff: userNameMap[l.UserID] || l.UserID || 'Manager/Admin'
+        });
+      });
+
+      orders.forEach(o => {
+        const hasRefundNote = /refund|void/i.test(String(o.DiscountReason || '')) || ['VOIDED', 'CANCELLED'].includes(o.OrderStatus) || o.PaymentStatus === 'REFUNDED';
+        if (hasRefundNote && !seenLogOrderIds.has(o.OrderID)) {
+          const dt = new Date(o.UpdatedAt || o.CreatedAt);
+          const amtMatch = String(o.DiscountReason || '').match(/Refund\s*\([^\d.-]*([0-9]+(?:\.[0-9]+)?)/i);
+          const parsedAmt = amtMatch ? parseFloat(amtMatch[1]) : Number(o.GrandTotal || 0);
+          refundAuditRows.push({
+            dateTime: `${dt.toLocaleDateString()} ${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+            branch: branchNameMap[o.BranchID] || o.BranchID || 'Main',
+            orderNumber: o.OrderNumber,
+            table: o.TableNumber || 'Takeout',
+            action: o.OrderStatus === 'VOIDED' ? 'FULL_ORDER_REFUND' : (o.OrderStatus === 'CANCELLED' ? 'CANCELLED' : 'ITEM_REFUND'),
+            amount: Number.isFinite(parsedAmt) ? parsedAmt : 0,
+            details: o.DiscountReason || o.OrderStatus,
+            staff: o.CounterName || o.WaiterName || 'Manager/Admin'
+          });
+        }
+      });
+
+      const totalRefundedAmount = refundAuditRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+
       const branchMap = {};
       (state.branches || []).forEach(b => {
         branchMap[b.BranchID] = { branchId: b.BranchID, branchName: `${b.BranchName} (${b.BranchCode})`, orders: 0, subtotal: 0, discount: 0, tax: 0, sales: 0 };
@@ -960,7 +1189,8 @@ async function callServer(fnName, ...args) {
           discount: Number(o.Discount || 0),
           tax: Number(o.Tax || 0),
           service: Number(o.ServiceCharge || 0),
-          total: Number(o.GrandTotal || 0)
+          total: Number(o.GrandTotal || 0),
+          notes: o.DiscountReason || ''
         };
       });
 
@@ -968,14 +1198,15 @@ async function callServer(fnName, ...args) {
         currency: curr(),
         allBranches,
         range: { start: opts.startDate, end: opts.endDate },
-        totals: { sales: totalSales, subtotal: totalSub, discount: totalDisc, tax: totalTax, service: totalSrv, items: totalItems },
-        counts: { paid: paid.length, cancelled: cancelled.length, open: open.length },
+        totals: { sales: totalSales, subtotal: totalSub, discount: totalDisc, tax: totalTax, service: totalSrv, items: totalItems, refunded: totalRefundedAmount },
+        counts: { paid: paid.length, cancelled: cancelled.length, open: open.length, refunds: refundAuditRows.length },
         averageOrderValue: paid.length ? totalSales / paid.length : 0,
         branchBreakdown,
         paymentBreakdown,
         topItems,
         daily: Object.values(dailyMap).sort((a, b) => b.date.localeCompare(a.date)),
-        orders: orderRows
+        orders: orderRows,
+        refunds: refundAuditRows
       };
     }
     case 'getEndOfDayReport': {
@@ -985,32 +1216,152 @@ async function callServer(fnName, ...args) {
         ? Math.max(0, Number(actualCashRaw) || 0)
         : null;
 
-      const [{ data: ords }, { data: itms }] = await Promise.all([
-        sbClient.from('orders').select('*').eq('BranchID', bId).gte('CreatedAt', `${dateVal}T00:00:00`).lte('CreatedAt', `${dateVal}T23:59:59`),
-        sbClient.from('order_items').select('*').eq('BranchID', bId)
+      const [{ data: ords }, { data: itms }, { data: actLogs }] = await Promise.all([
+        sbClient.from('orders').select('*').eq('BranchID', bId).gte('CreatedAt', `${dateVal}T00:00:00`).lte('CreatedAt', `${dateVal}T23:59:59`).order('CreatedAt', { ascending: true }),
+        sbClient.from('order_items').select('*').eq('BranchID', bId),
+        sbClient.from('activity_logs').select('*').gte('Timestamp', `${dateVal}T00:00:00`).lte('Timestamp', `${dateVal}T23:59:59`).order('Timestamp', { ascending: true }).limit(500)
       ]);
       const orders = ords || [];
       const paid = orders.filter(o => o.PaymentStatus === 'PAID');
       const cancelled = orders.filter(o => ['CANCELLED', 'VOIDED'].includes(o.OrderStatus));
       const openOrders = orders.filter(o => o.PaymentStatus !== 'PAID' && !['CANCELLED', 'VOIDED'].includes(o.OrderStatus));
 
+      const userNameMap = {};
+      (state.users || []).forEach(u => { userNameMap[u.UserID] = u.FullName; });
+
+      const orderMap = {};
+      orders.forEach(o => { orderMap[o.OrderID] = o; });
+
+      // Build Edit Order / Item Refunds & Voids Log for the Business Date
+      const refundLogs = [];
+      const seenRefundOrders = new Set();
+      (actLogs || []).forEach(l => {
+        if (!['ITEM_REFUND', 'ITEM_REFUND_VOID', 'FULL_ORDER_REFUND', 'REJECT_COUNTER'].includes(l.Action)) return;
+        const ord = orderMap[l.EntityID];
+        if (!ord) return;
+        seenRefundOrders.add(ord.OrderID);
+        const dt = new Date(l.Timestamp);
+        const amtMatch = String(l.NewValue || '').match(/Refunded\s*[^\d.-]*([0-9]+(?:\.[0-9]+)?)/i);
+        const amt = amtMatch ? parseFloat(amtMatch[1]) : Number(ord.GrandTotal || 0);
+        refundLogs.push({
+          time: dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          orderNumber: ord.OrderNumber,
+          table: ord.TableNumber || 'Takeout',
+          action: l.Action,
+          amount: Number.isFinite(amt) ? amt : 0,
+          details: l.NewValue || ord.DiscountReason || '—',
+          staff: userNameMap[l.UserID] || ord.CounterName || 'Manager/Admin'
+        });
+      });
+
+      orders.forEach(o => {
+        const hasRefundOrVoid = /refund|void/i.test(String(o.DiscountReason || '')) || ['VOIDED', 'CANCELLED'].includes(o.OrderStatus) || o.PaymentStatus === 'REFUNDED';
+        if (hasRefundOrVoid && !seenRefundOrders.has(o.OrderID)) {
+          const dt = new Date(o.UpdatedAt || o.CreatedAt);
+          const amtMatch = String(o.DiscountReason || '').match(/Refund\s*\([^\d.-]*([0-9]+(?:\.[0-9]+)?)/i);
+          const amt = amtMatch ? parseFloat(amtMatch[1]) : Number(o.GrandTotal || 0);
+          refundLogs.push({
+            time: dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            orderNumber: o.OrderNumber,
+            table: o.TableNumber || 'Takeout',
+            action: o.OrderStatus === 'VOIDED' ? 'FULL_ORDER_REFUND' : (o.OrderStatus === 'CANCELLED' ? 'CANCELLED' : 'ITEM_REFUND'),
+            amount: Number.isFinite(amt) ? amt : 0,
+            details: o.DiscountReason || o.OrderStatus,
+            staff: o.CounterName || o.WaiterName || 'Manager/Admin'
+          });
+        }
+      });
+
+      const totalRefunded = refundLogs.reduce((s, r) => s + Number(r.amount || 0), 0);
+
+      // Full Transaction Log (all branch orders + branch activity logs for the date)
+      const branchOrderIds = new Set(orders.map(o => o.OrderID));
+      const transactionLogs = orders.map(o => {
+        const dt = new Date(o.PaidAt || o.CreatedAt);
+        const pm = o.PaymentMethod === 'Delivery' && o.DeliveryPlatform
+          ? `Delivery (${o.DeliveryPlatform})`
+          : (o.PaymentMethod || 'Unpaid');
+        return {
+          time: dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          orderNumber: o.OrderNumber,
+          table: o.TableNumber || 'Takeout',
+          customer: o.CustomerName || 'Walk-In',
+          method: pm,
+          status: o.OrderStatus,
+          paymentStatus: o.PaymentStatus,
+          total: Number(o.GrandTotal || 0),
+          staff: o.CounterName || o.WaiterName || '—',
+          note: o.DiscountReason || ''
+        };
+      });
+
+      const activityEvents = (actLogs || [])
+        .filter(l => !l.EntityID || l.EntityType !== 'Order' || branchOrderIds.has(l.EntityID))
+        .map(l => ({
+          time: new Date(l.Timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          user: userNameMap[l.UserID] || l.UserID || 'System',
+          action: l.Action,
+          entity: l.EntityType || '',
+          details: l.NewValue || ''
+        }));
+
       const totalSales = paid.reduce((s, o) => s + Number(o.GrandTotal || 0), 0);
       const totalCollected = paid.reduce((s, o) => s + Number(o.AmountTendered || o.GrandTotal || 0), 0);
       const totalChange = paid.reduce((s, o) => s + Number(o.ChangeAmount || 0), 0);
 
+      // Separate Hybrid payments (e.g., Hybrid (Cash + GCash)) into individual payment methods
       const methodMap = {};
+      const addMethodSplit = (methodLabel, amount) => {
+        const amt = Number(amount || 0);
+        if (amt <= 0) return;
+        const key = String(methodLabel || 'Cash').trim();
+        if (!methodMap[key]) methodMap[key] = { method: key, count: 0, total: 0 };
+        methodMap[key].count++;
+        methodMap[key].total += amt;
+      };
+
       let cashSales = 0;
       let cashTendered = 0;
       paid.forEach(o => {
-        const label = o.PaymentMethod === 'Delivery' && o.DeliveryPlatform
-          ? `Delivery (${o.DeliveryPlatform})`
-          : (o.PaymentMethod || 'Cash');
-        if (!methodMap[label]) methodMap[label] = { method: label, count: 0, total: 0 };
-        methodMap[label].count++;
-        methodMap[label].total += Number(o.GrandTotal || 0);
-        if ((o.PaymentMethod || 'Cash') === 'Cash') {
-          cashSales += Number(o.GrandTotal || 0);
-          cashTendered += Number(o.AmountTendered || o.GrandTotal || 0);
+        const pm = String(o.PaymentMethod || 'Cash').trim();
+        const grandTotal = Number(o.GrandTotal || 0);
+        const changeAmt = Number(o.ChangeAmount || 0);
+
+        if (pm.startsWith('Hybrid (')) {
+          const refStr = String(o.ReferenceNumber || '');
+          const mCash = refStr.match(/Cash:\s*([0-9.]+)/i);
+          const hybridInner = pm.match(/^Hybrid\s*\(\s*Cash\s*\+\s*([^)]+)\)/i);
+          const secondName = hybridInner ? hybridInner[1].trim() : 'E-Wallet / Card';
+
+          const escapedSecond = secondName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const mSecond = refStr.match(new RegExp(`${escapedSecond}:\\s*([0-9.]+)`, 'i'));
+
+          const rawCash = mCash ? parseFloat(mCash[1]) : 0;
+          const netCash = Math.max(0, rawCash - changeAmt);
+          const secondAmt = mSecond
+            ? parseFloat(mSecond[1])
+            : Math.max(0, grandTotal - netCash);
+
+          if (netCash > 0) {
+            addMethodSplit('Cash', netCash);
+            cashSales += netCash;
+          }
+          if (rawCash > 0) {
+            cashTendered += rawCash;
+          }
+          if (secondAmt > 0) {
+            addMethodSplit(secondName, secondAmt);
+          }
+        } else {
+          const label = pm === 'Delivery' && o.DeliveryPlatform
+            ? `Delivery (${o.DeliveryPlatform})`
+            : pm;
+          addMethodSplit(label, grandTotal);
+
+          if (pm === 'Cash') {
+            cashSales += grandTotal;
+            cashTendered += Number(o.AmountTendered || grandTotal);
+          }
         }
       });
 
@@ -1045,7 +1396,8 @@ async function callServer(fnName, ...args) {
           paid: paid.length,
           cancelled: cancelled.length,
           open: openOrders.length,
-          itemsQty: totalItemsQty
+          itemsQty: totalItemsQty,
+          refunds: refundLogs.length
         },
         paymentBreakdown: Object.values(methodMap).sort((a, b) => b.total - a.total),
         cashDrawer: {
@@ -1065,11 +1417,15 @@ async function callServer(fnName, ...args) {
           tax: paid.reduce((s, o) => s + Number(o.Tax || 0), 0),
           vatableSales: paid.reduce((s, o) => s + Number(o.VatableSales || 0), 0),
           vatExemptSales: paid.reduce((s, o) => s + Number(o.VatExemptSales || 0), 0),
-          sales: totalSales
+          sales: totalSales,
+          refunded: totalRefunded
         },
         totalCollected,
         totalChange,
-        itemsSold: Object.values(itemMap).sort((a, b) => b.quantity - a.quantity)
+        itemsSold: Object.values(itemMap).sort((a, b) => b.quantity - a.quantity),
+        refundLogs,
+        transactionLogs,
+        activityEvents
       };
     }
     case 'getEodHistory': {
@@ -1198,7 +1554,7 @@ function stopRealtime() {
 function renderBranchSwitcher() {
   const wrap = $('branchSwitcherWrap');
   if (!wrap || !state.user) return;
-  if (state.user.role !== 'Admin') {
+  if (!isGlobalAdmin()) {
     wrap.innerHTML = `<span class="badge bg-warning text-dark"><i class="fa-solid fa-store me-1"></i>${escapeHtml(state.user.branchName || 'Main Branch')}</span>`;
     return;
   }
@@ -1252,7 +1608,7 @@ function renderBranchesAdminTable() {
 
   const uBranch = $('cfgUserBranch');
   if (uBranch) {
-    uBranch.innerHTML = (state.user?.role === 'Admin' ? '<option value="">All Branches (Admin)</option>' : '') +
+    uBranch.innerHTML = (isGlobalAdmin() ? '<option value="">All Branches (Admin)</option>' : '') +
       (state.branches || []).map(b => `<option value="${escapeHtml(b.BranchID)}">${escapeHtml(b.BranchName)}</option>`).join('');
   }
 }
@@ -1342,8 +1698,8 @@ function applyOptimistic(item) {
         EstimatedPreparationMinutes: 15, EstimatedCompletionTime: '',
         CreatedAt: iso, UpdatedAt: iso, _offline: true,
         items: (p.items || []).map(i => ({
-          OrderItemID: '', OrderID: item.id, MenuItemID: i.menuItemId, ItemNameSnapshot: i.itemName,
-          UnitPriceSnapshot: i.price, Quantity: i.quantity, Station: i.station || 'Kitchen', Status: 'PENDING'
+          OrderItemID: uuid(), OrderID: item.id, MenuItemID: i.menuItemId, ItemNameSnapshot: i.itemName,
+          UnitPriceSnapshot: i.price, Quantity: i.quantity, Station: i.station || 'Kitchen', Status: 'PENDING', KitchenStatus: 'Pending'
         }))
       });
       if (p.tableId) setTableStatus(p.tableId, 'Waiting for Counter Confirmation');
@@ -1365,8 +1721,26 @@ function applyOptimistic(item) {
         o.OrderStatus = 'READY';
         if (o.TableID) setTableStatus(o.TableID, 'Ready to Serve');
       } else if (action === 'SERVE') {
-        o.OrderStatus = 'SERVED';
-        if (o.TableID) setTableStatus(o.TableID, 'Needs Cleaning');
+        const itemUpdates = Array.isArray(params.itemUpdates) ? params.itemUpdates : null;
+        if (itemUpdates !== null && Array.isArray(o.items)) {
+          const updMap = {};
+          itemUpdates.forEach(u => { updMap[u.orderItemId] = Math.max(0, parseInt(u.servedQty, 10) || 0); });
+          let allFull = o.items.length > 0;
+          o.items.forEach(it => {
+            const totalQty = Number(it.Quantity || it.Qty || 1);
+            const sQty = Math.min(totalQty, updMap[it.OrderItemID] ?? 0);
+            const isFull = sQty >= totalQty;
+            if (!isFull) allFull = false;
+            it.ServedQty = sQty;
+            it.Status = isFull ? 'SERVED' : 'PREPARING';
+            it.KitchenStatus = isFull ? 'Served' : (sQty > 0 ? `Partial ${sQty}/${totalQty}` : 'Preparing');
+          });
+          o.OrderStatus = allFull ? 'SERVED' : 'PREPARING';
+          if (o.TableID) setTableStatus(o.TableID, allFull ? 'Served' : 'Preparing');
+        } else {
+          o.OrderStatus = 'SERVED';
+          if (o.TableID) setTableStatus(o.TableID, 'Served');
+        }
       }
     } else if (item.fn === 'processPayment') {
       const p = a[0] || {};
@@ -1385,7 +1759,8 @@ function applyOptimistic(item) {
       const due = Math.max(0, Number(o.GrandTotal || 0) - Number(o.AmountPaid || 0));
       state.localPayments[o.OrderID] = [{
         PaymentMethod: p.paymentMethod || 'Cash', AmountPaid: received,
-        ChangeAmount: Math.max(0, received - due), ReferenceNumber: p.referenceNumber || ''
+        ChangeAmount: p.changeAmount !== undefined ? Number(p.changeAmount) : Math.max(0, received - due),
+        ReferenceNumber: p.referenceNumber || ''
       }];
       if (o.OrderStatus === 'PENDING_COUNTER') {
         o.OrderStatus = 'CONFIRMED_BY_COUNTER';
@@ -1628,16 +2003,35 @@ function applyRoleNav() {
     el.style.display = allowed.includes(el.dataset.view) ? '' : 'none';
     el.onclick = (ev) => { ev.preventDefault(); switchView(el.dataset.view); };
   });
-  const isGlobalAdmin = state.user.role === 'Admin';
+
+  const adminOnly = isGlobalAdmin();
   const brTab = $('adminBranchesTabBtn');
-  if (brTab) brTab.style.display = isGlobalAdmin ? '' : 'none';
+  if (brTab) brTab.style.display = adminOnly ? '' : 'none';
+
+  // Activity Log tab visible ONLY if Admin is logged in
+  const logsTabItem = $('adminLogsTabItem');
+  const logsTabPane = $('tabLogs');
+  if (logsTabItem) logsTabItem.style.display = adminOnly ? '' : 'none';
+  if (logsTabPane && !adminOnly) logsTabPane.classList.remove('show', 'active');
+
+  // Sales Report: Non-admin sees only their Branch; Admin sees All Branches option
   const rScopeWrap = $('reportScopeWrap');
-  if (rScopeWrap) rScopeWrap.style.display = isGlobalAdmin ? '' : 'none';
+  const rScopeSel = $('reportBranchScope');
+  if (rScopeWrap) rScopeWrap.style.display = adminOnly ? '' : 'none';
+  if (rScopeSel) {
+    if (!adminOnly) {
+      rScopeSel.value = 'CURRENT';
+    } else if (!rScopeSel.dataset.initialized) {
+      rScopeSel.value = 'ALL';
+      rScopeSel.dataset.initialized = 'true';
+    }
+  }
+
   if (allowed.length && !allowed.includes(state.currentView)) switchView(allowed[0]);
 }
 
 function canServeOrder(o) {
-  if (o.OrderStatus === 'READY') return true;
+  if (['READY', 'SERVED'].includes(o.OrderStatus)) return true;
   return isKdsDisabled() && ['CONFIRMED_BY_COUNTER', 'ACCEPTED_BY_KITCHEN', 'PREPARING'].includes(o.OrderStatus);
 }
 
@@ -1668,7 +2062,7 @@ function applyBootstrap(data) {
   if (data.tables) state.tables = data.tables;
   state.users = data.users || [];
   state.branches = data.branches || [];
-  if (state.user?.role === 'Admin' && state.branches.length && !state.branches.some(b => b.BranchID === state.activeBranchId)) {
+  if (isGlobalAdmin() && state.branches.length && !state.branches.some(b => b.BranchID === state.activeBranchId)) {
     state.activeBranchId = state.branches[0].BranchID;
   }
   $('brandName').textContent = state.settings.RESTAURANT_NAME || 'Tuna Choice POS';
@@ -1709,7 +2103,9 @@ function switchView(view) {
   if (view === 'admin') {
     if (navigator.onLine && Date.now() - (state.adminLoadedAt || 0) > 15000) {
       state.adminLoadedAt = Date.now();
-      loadAdminStats(); loadActivityLogs(); loadEodHistory();
+      loadAdminStats();
+      if (isGlobalAdmin()) loadActivityLogs();
+      loadEodHistory();
     }
     if (!$('eodDate').value) $('eodDate').value = todayStr();
     syncEodDrawerInputs();
@@ -1720,7 +2116,7 @@ function switchView(view) {
 function renderCurrentView() {
   const v = state.currentView;
   if (v === 'waiter') { syncDashViewButtons(); renderTables(); renderWaiterOrders(); }
-  else if (v === 'counter') { syncCounterViewButtons(); renderCounterQueue(); }
+  else if (v === 'counter') { syncCounterViewButtons(); renderCounterQueue(); renderCounterOrderListTable(); }
   else if (v === 'kitchen') renderKitchenDisplay();
   if ($('orderModal').classList.contains('show')) { renderPOSMenu(); updateCartDisplay(); }
 }
@@ -1803,7 +2199,7 @@ function showOffline() {
 function hideOffline() { $('offlineBanner').style.display = 'none'; }
 
 /* ============================================================
-   ALERTS, TABLES, RESERVATIONS, WAITER ORDERS, COUNTER, KDS
+   ALERTS, TABLES, RESERVATIONS, WAITER ORDERS & SERVE CHECKLIST
    ============================================================ */
 function checkAlerts(silent) {
   const role = state.user && state.user.role;
@@ -1957,8 +2353,12 @@ function syncDashViewButtons() {
   if (l) l.classList.toggle('active', state.dashView !== 'grid');
 }
 function waiterOrderButtons(o) {
+  const isServed = o.OrderStatus === 'SERVED';
   const serveBtn = canServeOrder(o)
-    ? `<button class="btn btn-sm btn-success fw-bold me-1" onclick="serveOrder('${o.OrderID}')"><i class="fa-solid fa-concierge-bell me-1"></i>Serve</button>` : '';
+    ? (isServed
+      ? `<button class="btn btn-sm btn-outline-success fw-bold me-1" onclick="serveOrder('${o.OrderID}')" title="Review served items checklist"><i class="fa-solid fa-check-double me-1"></i>Served</button>`
+      : `<button class="btn btn-sm btn-success fw-bold me-1" onclick="serveOrder('${o.OrderID}')"><i class="fa-solid fa-concierge-bell me-1"></i>Serve</button>`)
+    : '';
   const isClosed = ['COMPLETED', 'CANCELLED', 'VOIDED'].includes(o.OrderStatus);
   const transferBtn = !isClosed
     ? `<button class="btn btn-sm btn-outline-primary fw-semibold" onclick="openTransferModal('${o.OrderID}')"><i class="fa-solid fa-arrows-rotate me-1"></i>Transfer</button>` : '';
@@ -1970,7 +2370,7 @@ function waiterOrderEta(o) {
 function waiterOrderCard(o) {
   const pendingIcon = o._offline ? ' <i class="fa-solid fa-cloud-arrow-up text-warning"></i>' : '';
   const paidBadge = o.PaymentStatus === 'PAID' ? '<span class="badge bg-success"><i class="fa-solid fa-check me-1"></i>PAID</span>' : '<span class="badge bg-danger">UNPAID</span>';
-  return `<div class="col-12 col-md-4"><div class="card card-pos p-3">
+  return `<div class="col-12 col-md-4"><div class="card card-pos p-3 ${o.OrderStatus === 'SERVED' ? 'border border-success' : ''}">
     <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-2">
       <h5 class="mb-0">${escapeHtml(o.OrderNumber)}${pendingIcon}</h5>
       <span class="badge bg-secondary fs-6">${escapeHtml(o.TableNumber || 'Takeout')}</span>
@@ -1978,7 +2378,14 @@ function waiterOrderCard(o) {
     <div class="d-flex justify-content-between align-items-center mb-1"><span class="small">${badgeForStatus(o.OrderStatus)}</span>${paidBadge}</div>
     <p class="mb-1"><strong>${escapeHtml(o.CustomerName || 'Walk-In Customer')}</strong></p>
     <p class="mb-2 small text-muted"><i class="fa-solid fa-user-tie text-warning me-1"></i>Waiter: <strong>${escapeHtml(o.WaiterName || '—')}</strong></p>
-    <ul class="list-group list-group-flush mb-2">${(o.items || []).map(i => `<li class="list-group-item px-0 py-1 small">${i.Quantity}× ${escapeHtml(i.ItemNameSnapshot)}</li>`).join('')}</ul>
+    <ul class="list-group list-group-flush mb-2">${(o.items || []).map(i => {
+      const tq = Number(i.Quantity || i.Qty || 1);
+      const sq = getServedItemQty(i);
+      const badge = sq >= tq
+        ? '<span class="badge bg-success">Served</span>'
+        : (sq > 0 ? `<span class="badge bg-warning text-dark">Served ${sq}/${tq}</span>` : '<span class="badge bg-light text-dark border">Pending</span>');
+      return `<li class="list-group-item px-0 py-1 small d-flex justify-content-between"><span>${tq}× ${escapeHtml(i.ItemNameSnapshot)}</span>${badge}</li>`;
+    }).join('')}</ul>
     <div class="d-flex justify-content-between mb-1"><span>Total:</span><strong class="text-danger">${curr()}${Number(o.GrandTotal || 0).toFixed(2)}</strong></div>
     <div class="d-flex justify-content-between small mb-2"><span class="text-muted">ETA:</span><span>${waiterOrderEta(o)}</span></div>
     <div class="d-flex gap-1">${waiterOrderButtons(o)}</div>
@@ -2000,12 +2407,14 @@ function renderWaiterOrders() {
   }
   setHtml(body, orderList.map(o => {
     const pendingIcon = o._offline ? ' <i class="fa-solid fa-cloud-arrow-up text-warning"></i>' : '';
-    return `<tr>
+    const servedQtySum = (o.items || []).reduce((s, i) => s + getServedItemQty(i), 0);
+    const totalQtySum = (o.items || []).reduce((s, i) => s + Number(i.Quantity || i.Qty || 1), 0);
+    return `<tr class="${o.OrderStatus === 'SERVED' ? 'table-success' : ''}">
       <td><strong>${escapeHtml(o.OrderNumber)}</strong>${pendingIcon}</td>
       <td><span class="badge bg-secondary fs-6">${escapeHtml(o.TableNumber || 'Takeout')}</span></td>
       <td>${escapeHtml(o.CustomerName)}</td>
       <td><i class="fa-solid fa-user-tie text-warning me-1"></i>${escapeHtml(o.WaiterName || '—')}</td>
-      <td>${(o.items || []).length}</td>
+      <td>${(o.items || []).length} <small class="text-muted">(${servedQtySum}/${totalQtySum} served)</small></td>
       <td>${curr()}${Number(o.GrandTotal || 0).toFixed(2)}</td>
       <td>${badgeForStatus(o.OrderStatus)}</td>
       <td>${waiterOrderEta(o)}</td>
@@ -2015,8 +2424,141 @@ function renderWaiterOrders() {
   updateEtas();
 }
 
+/* ============================================================
+   SERVE ITEMS CHECKLIST MODAL (SUPPORTS EDITING PARTIAL QUANTITIES)
+   ============================================================ */
+function serveOrder(orderId) {
+  const o = (state.orders || []).find(x => x.OrderID === orderId);
+  if (!o) return toast('Order not found.', 'warning');
+
+  $('serveCheckOrderId').value = o.OrderID;
+  $('serveCheckOrderNum').textContent = o.OrderNumber;
+  $('serveCheckTable').textContent = o.TableNumber || 'Takeout';
+
+  const items = o.items || [];
+  const defaultAllReady = o.OrderStatus !== 'SERVED' && !items.some(it => getServedItemQty(it) > 0);
+
+  $('serveChecklistContainer').innerHTML = items.length
+    ? items.map(it => {
+      const totalQty = Number(it.Quantity || it.Qty || 1);
+      const initialServed = defaultAllReady ? totalQty : getServedItemQty(it);
+      const checked = initialServed > 0;
+      return `
+        <div class="list-group-item d-flex justify-content-between align-items-center gap-2">
+          <label class="form-check mb-0 flex-grow-1" style="cursor:pointer;">
+            <input class="form-check-input serve-item-checkbox me-2" type="checkbox"
+                   data-item-id="${escapeHtml(it.OrderItemID)}"
+                   data-total-qty="${totalQty}"
+                   ${checked ? 'checked' : ''}
+                   onchange="onServeItemCheckboxChange(this)">
+            <span class="fw-bold">${totalQty}× ${escapeHtml(it.ItemNameSnapshot || it.ItemName)}</span>
+            <span class="badge bg-light text-dark border ms-1">${escapeHtml(it.Station || 'Kitchen')}</span>
+          </label>
+          <div class="d-flex align-items-center gap-1">
+            <span class="small text-muted">Served:</span>
+            <input type="number"
+                   class="form-control form-control-sm text-center fw-bold serve-item-qty-input"
+                   style="width:66px;"
+                   data-item-id="${escapeHtml(it.OrderItemID)}"
+                   data-total-qty="${totalQty}"
+                   min="0" max="${totalQty}" value="${initialServed}"
+                   oninput="onServeItemQtyInput(this)">
+            <span class="small text-muted fw-semibold">/ ${totalQty}</span>
+          </div>
+        </div>`;
+    }).join('')
+    : '<div class="text-muted small py-2">No line items recorded for this order.</div>';
+
+  updateServeChecklistNote();
+  showModal('serveChecklistModal');
+}
+
+function onServeItemCheckboxChange(cb) {
+  const itemId = cb.dataset.itemId;
+  const totalQty = parseInt(cb.dataset.totalQty, 10) || 1;
+  const qtyInp = document.querySelector(`.serve-item-qty-input[data-item-id="${itemId}"]`);
+  if (qtyInp) {
+    qtyInp.value = cb.checked ? totalQty : 0;
+  }
+  updateServeChecklistNote();
+}
+
+function onServeItemQtyInput(inp) {
+  const itemId = inp.dataset.itemId;
+  const totalQty = parseInt(inp.dataset.totalQty, 10) || 1;
+  let val = parseInt(inp.value, 10);
+  if (isNaN(val) || val < 0) val = 0;
+  if (val > totalQty) { val = totalQty; inp.value = totalQty; }
+  const cb = document.querySelector(`.serve-item-checkbox[data-item-id="${itemId}"]`);
+  if (cb) {
+    cb.checked = val > 0;
+  }
+  updateServeChecklistNote();
+}
+
+function toggleAllServeChecklist(checked) {
+  document.querySelectorAll('.serve-item-checkbox').forEach(cb => {
+    cb.checked = checked;
+    const itemId = cb.dataset.itemId;
+    const totalQty = parseInt(cb.dataset.totalQty, 10) || 1;
+    const qtyInp = document.querySelector(`.serve-item-qty-input[data-item-id="${itemId}"]`);
+    if (qtyInp) qtyInp.value = checked ? totalQty : 0;
+  });
+  updateServeChecklistNote();
+}
+
+function updateServeChecklistNote() {
+  const qtyInputs = Array.from(document.querySelectorAll('.serve-item-qty-input'));
+  const noteEl = $('serveChecklistStatusNote');
+  if (!noteEl) return;
+
+  let totalOrdered = 0;
+  let totalServed = 0;
+  qtyInputs.forEach(inp => {
+    const maxQ = parseInt(inp.dataset.totalQty, 10) || 1;
+    const curQ = Math.min(maxQ, Math.max(0, parseInt(inp.value, 10) || 0));
+    totalOrdered += maxQ;
+    totalServed += curQ;
+  });
+
+  const remaining = Math.max(0, totalOrdered - totalServed);
+  if (totalOrdered === 0 || remaining === 0) {
+    noteEl.className = 'alert alert-success small py-2 mb-3';
+    noteEl.innerHTML = `<i class="fa-solid fa-circle-check me-1"></i>All ${totalOrdered} item quantity served. Order status will be marked as <strong>SERVED</strong>.`;
+  } else {
+    noteEl.className = 'alert alert-warning small py-2 mb-3';
+    noteEl.innerHTML = `<i class="fa-solid fa-fire me-1"></i>Served <strong>${totalServed} of ${totalOrdered}</strong> (${remaining} short/pending). Order status will stay in <strong>PREPARING</strong> until all items are served.`;
+  }
+}
+
+async function submitServeChecklist() {
+  const orderId = $('serveCheckOrderId').value;
+  const qtyInputs = Array.from(document.querySelectorAll('.serve-item-qty-input'));
+  let allFull = true;
+  const itemUpdates = qtyInputs.map(inp => {
+    const totalQty = parseInt(inp.dataset.totalQty, 10) || 1;
+    const servedQty = Math.min(totalQty, Math.max(0, parseInt(inp.value, 10) || 0));
+    if (servedQty < totalQty) allFull = false;
+    return { orderItemId: inp.dataset.itemId, servedQty, totalQty };
+  });
+
+  const doneMsg = allFull
+    ? 'All items served — order marked as SERVED!'
+    : 'Partial serve saved — order remains in PREPARING until remaining items are served.';
+
+  const r = await transition(
+    orderId,
+    'SERVE',
+    { itemUpdates },
+    'Serve checklist',
+    'Updating serve checklist…',
+    doneMsg
+  );
+  if (r) hideModal('serveChecklistModal');
+}
+
 function badgeForStatus(s) {
-  const map = { PENDING_COUNTER: 'warning text-dark', CONFIRMED_BY_COUNTER: 'info', ACCEPTED_BY_KITCHEN: 'primary', PREPARING: 'primary', READY: 'success', SERVED: 'secondary', COMPLETED: 'dark', CANCELLED: 'danger', VOIDED: 'danger' };
+  const map = { PENDING_COUNTER: 'warning text-dark', CONFIRMED_BY_COUNTER: 'info', ACCEPTED_BY_KITCHEN: 'primary', PREPARING: 'primary', READY: 'success', SERVED: 'success', COMPLETED: 'dark', CANCELLED: 'danger', VOIDED: 'danger' };
   return `<span class="badge bg-${map[s] || 'secondary'} badge-status">${escapeHtml(String(s).replace(/_/g, ' '))}</span>`;
 }
 function formatEta(iso) { const diff = new Date(iso) - new Date(); return diff <= 0 ? 'LATE' : `${Math.floor(diff / 60000)}m`; }
@@ -2074,6 +2616,9 @@ async function submitTableMerge() {
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
+/* ============================================================
+   COUNTER VIEW, ORDER LIST TABLE & MANAGER/ADMIN ITEM REFUND
+   ============================================================ */
 function setCounterView(mode) { state.counterView = mode === 'list' ? 'list' : 'grid'; lsSet('pos_counter_view', state.counterView); syncCounterViewButtons(); renderCounterQueue(); }
 function syncCounterViewButtons() {
   const g = $('btnCounterGrid'), l = $('btnCounterList');
@@ -2162,6 +2707,176 @@ function renderCounterQueue() {
   }
 }
 
+function renderCounterOrderListTable() {
+  const tbody = $('counterOrdersTableBody');
+  if (!tbody) return;
+  const orderList = Array.isArray(state.orders) ? state.orders : [];
+  const canEdit = isManagerOrAdmin();
+
+  if ($('counterOrderListCount')) {
+    $('counterOrderListCount').textContent = `${orderList.length} order${orderList.length === 1 ? '' : 's'}`;
+  }
+
+  if (!orderList.length) {
+    setHtml(tbody, '<tr><td colspan="9" class="text-center text-muted py-3">No orders in the current branch queue.</td></tr>');
+    return;
+  }
+
+  setHtml(tbody, orderList.map(o => {
+    const itemsSummary = (o.items || []).map(i => `${i.Quantity || i.Qty}× ${escapeHtml(i.ItemNameSnapshot || i.ItemName)}`).join(', ');
+    const payBadge = o.PaymentStatus === 'PAID'
+      ? `<span class="badge bg-success">PAID</span>`
+      : `<span class="badge bg-danger">UNPAID</span>`;
+
+    const editBtn = canEdit
+      ? `<button class="btn btn-sm btn-warning fw-bold text-dark me-1" onclick="openCounterEditOrderModal('${escapeHtml(o.OrderID)}')" title="Edit Order or Refund Unserved Item"><i class="fa-solid fa-pen-to-square me-1"></i>Edit / Refund</button>`
+      : `<button class="btn btn-sm btn-outline-secondary me-1" disabled title="Only Manager or Admin can edit or refund orders"><i class="fa-solid fa-lock me-1"></i>Mgr/Admin</button>`;
+
+    const receiptBtn = o.PaymentStatus === 'PAID'
+      ? `<button class="btn btn-sm btn-outline-secondary" onclick="openReceiptModal('${escapeHtml(o.OrderID)}')" title="Receipt"><i class="fa-solid fa-receipt"></i></button>`
+      : `<button class="btn btn-sm btn-outline-primary" onclick="openPaymentModal('${escapeHtml(o.OrderID)}')" title="Pay"><i class="fa-solid fa-money-bill"></i></button>`;
+
+    return `
+      <tr>
+        <td><strong>${escapeHtml(o.OrderNumber)}</strong></td>
+        <td><span class="badge bg-secondary">${escapeHtml(o.TableNumber || 'Takeout')}</span></td>
+        <td>${escapeHtml(o.CustomerName || 'Walk-In')}</td>
+        <td class="small">${escapeHtml(o.WaiterName || '—')}</td>
+        <td class="small text-muted" style="max-width:240px;">${itemsSummary || '—'}</td>
+        <td><strong class="text-danger">${curr()}${Number(o.GrandTotal || 0).toFixed(2)}</strong></td>
+        <td>${badgeForStatus(o.OrderStatus)}</td>
+        <td>${payBadge}</td>
+        <td class="text-end text-nowrap">${editBtn}${receiptBtn}</td>
+      </tr>`;
+  }).join(''));
+}
+
+function openCounterEditOrderModal(orderId) {
+  if (!isManagerOrAdmin()) {
+    return toast('Only Manager or Admin can edit orders or refund items.', 'warning');
+  }
+  const o = (state.orders || []).find(x => x.OrderID === orderId);
+  if (!o) return toast('Order not found.', 'warning');
+
+  $('editRefundOrderId').value = o.OrderID;
+  $('editRefundOrderNum').textContent = o.OrderNumber;
+  $('editRefundTable').textContent = o.TableNumber || 'Takeout';
+  $('editRefundCustomer').textContent = o.CustomerName || 'Walk-In Customer';
+  $('editRefundCurrentTotal').textContent = `${curr()}${Number(o.GrandTotal || 0).toFixed(2)}`;
+  $('editRefundStatusBadges').innerHTML = `${badgeForStatus(o.OrderStatus)} ${o.PaymentStatus === 'PAID' ? '<span class="badge bg-success">PAID</span>' : '<span class="badge bg-danger">UNPAID</span>'}`;
+  $('editRefundReason').value = '';
+
+  const tbody = $('editRefundItemsBody');
+  const items = o.items || [];
+  tbody.innerHTML = items.length ? items.map(it => {
+    const qty = Number(it.Quantity || it.Qty || 0);
+    const price = Number(it.UnitPriceSnapshot || it.UnitPrice || 0);
+    return `
+      <tr>
+        <td>
+          <strong>${escapeHtml(it.ItemNameSnapshot || it.ItemName)}</strong>
+          <div class="small text-muted">${escapeHtml(it.Station || 'Kitchen')} • ${escapeHtml(it.KitchenStatus || it.Status || 'PENDING')}</div>
+        </td>
+        <td class="text-center fw-bold">${qty}</td>
+        <td class="text-end">${curr()}${price.toFixed(2)}</td>
+        <td class="text-center">
+          <input type="number" class="form-control form-control-sm text-center fw-bold refund-qty-input"
+                 data-item-id="${escapeHtml(it.OrderItemID)}"
+                 data-unit-price="${price}"
+                 data-max-qty="${qty}"
+                 min="0" max="${qty}" value="0"
+                 oninput="recalcCounterRefundPreview()">
+        </td>
+        <td class="text-end text-danger fw-bold refund-line-amt">${curr()}0.00</td>
+      </tr>`;
+  }).join('') : '<tr><td colspan="5" class="text-center text-muted">No items on this order.</td></tr>';
+
+  recalcCounterRefundPreview();
+  showModal('counterEditOrderModal');
+}
+
+function recalcCounterRefundPreview() {
+  const orderId = $('editRefundOrderId')?.value;
+  const o = (state.orders || []).find(x => x.OrderID === orderId);
+  const currentTotal = o ? Number(o.GrandTotal || 0) : 0;
+  let totalRefund = 0;
+
+  document.querySelectorAll('.refund-qty-input').forEach(inp => {
+    const maxQty = parseInt(inp.dataset.maxQty, 10) || 0;
+    const unitPrice = parseFloat(inp.dataset.unitPrice) || 0;
+    let rQty = parseInt(inp.value, 10) || 0;
+    if (rQty < 0) { rQty = 0; inp.value = 0; }
+    if (rQty > maxQty) { rQty = maxQty; inp.value = maxQty; }
+    const lineAmt = rQty * unitPrice;
+    totalRefund += lineAmt;
+    const cell = inp.closest('tr')?.querySelector('.refund-line-amt');
+    if (cell) cell.textContent = `${curr()}${lineAmt.toFixed(2)}`;
+  });
+
+  const newTotal = Math.max(0, currentTotal - totalRefund);
+  if ($('editRefundAmountPreview')) $('editRefundAmountPreview').textContent = `-${curr()}${totalRefund.toFixed(2)}`;
+  if ($('editRefundNewTotalPreview')) $('editRefundNewTotalPreview').textContent = `${curr()}${newTotal.toFixed(2)}`;
+}
+
+async function submitCounterItemRefund() {
+  if (!isManagerOrAdmin()) return toast('Only Manager or Admin can process refunds.', 'warning');
+  const orderId = $('editRefundOrderId').value;
+  const reason = ($('editRefundReason').value || '').trim();
+  if (!reason) {
+    $('editRefundReason').focus();
+    return toast('Please enter a reason for the item refund.', 'warning');
+  }
+
+  const refunds = [];
+  document.querySelectorAll('.refund-qty-input').forEach(inp => {
+    const rQty = parseInt(inp.value, 10) || 0;
+    if (rQty > 0) {
+      refunds.push({ orderItemId: inp.dataset.itemId, refundQty: rQty });
+    }
+  });
+
+  if (!refunds.length) {
+    return toast('Enter a refund quantity (greater than 0) for at least one item.', 'warning');
+  }
+
+  if (!confirm('Confirm item refund? This will adjust the order items and totals.')) return;
+
+  try {
+    showLoading('Processing item refund…');
+    const res = await callServer('refundOrderItems', state.token, { orderId, refunds, reason, fullVoid: false });
+    showDone(res.message || 'Item refund processed!', async () => {
+      hideModal('counterEditOrderModal');
+      await poll(true);
+    });
+  } catch (err) {
+    hideLoading();
+    toast(err.message, 'danger');
+  }
+}
+
+async function submitFullOrderRefund() {
+  if (!isManagerOrAdmin()) return toast('Only Manager or Admin can void/refund orders.', 'warning');
+  const orderId = $('editRefundOrderId').value;
+  const reason = ($('editRefundReason').value || '').trim();
+  if (!reason) {
+    $('editRefundReason').focus();
+    return toast('Please enter a reason for the full order refund.', 'warning');
+  }
+  if (!confirm('Refund and void the ENTIRE order? The table will be freed immediately.')) return;
+
+  try {
+    showLoading('Refunding and voiding order…');
+    const res = await callServer('refundOrderItems', state.token, { orderId, refunds: [], reason, fullVoid: true });
+    showDone(res.message || 'Order refunded and voided!', async () => {
+      hideModal('counterEditOrderModal');
+      await poll(true);
+    });
+  } catch (err) {
+    hideLoading();
+    toast(err.message, 'danger');
+  }
+}
+
 function buildKitchenTicketHtml(o) {
   const items = o.items || [];
   const dt = new Date(o.CreatedAt || Date.now());
@@ -2223,7 +2938,13 @@ function renderKitchenDisplay() {
     return `<div class="col-12 col-md-4"><div class="card card-pos kds-card ${o.OrderStatus} p-3">
       <div class="d-flex justify-content-between align-items-center mb-1"><h5 class="mb-0 text-primary">${escapeHtml(o.OrderNumber)}</h5><span class="badge bg-dark">${escapeHtml(o.TableNumber || 'Takeout')}</span></div>
       <div class="d-flex justify-content-between text-muted small border-bottom pb-1 mb-2"><span><i class="fa-regular fa-clock me-1 text-warning"></i>${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span><span>${dt.toLocaleDateString()}</span></div>
-      <ul class="list-group mb-2">${(o.items || []).map(i => `<li class="list-group-item d-flex justify-content-between fw-bold"><span>${i.Quantity}× ${escapeHtml(i.ItemNameSnapshot)}</span><span class="badge bg-light text-dark">${escapeHtml(i.Station || '')}</span></li>`).join('')}</ul>
+      <ul class="list-group mb-2">${(o.items || []).map(i => {
+        const tq = Number(i.Quantity || i.Qty || 1);
+        const sq = getServedItemQty(i);
+        const rem = Math.max(0, tq - sq);
+        const remLabel = sq > 0 ? ` <span class="badge bg-warning text-dark">(${rem} left)</span>` : '';
+        return `<li class="list-group-item d-flex justify-content-between fw-bold"><span>${tq}× ${escapeHtml(i.ItemNameSnapshot)}${remLabel}</span><span class="badge bg-light text-dark">${escapeHtml(i.Station || '')}</span></li>`;
+      }).join('')}</ul>
       ${o.EstimatedCompletionTime ? `<div class="small mb-2 fw-semibold text-danger">ETA: <span class="eta-countdown" data-eta="${o.EstimatedCompletionTime}">${formatEta(o.EstimatedCompletionTime)}</span></div>` : ''}
       ${actionBtn}
     </div></div>`;
@@ -2239,7 +2960,6 @@ async function transition(orderId, action, params, label, loadingMsg, doneMsg) {
     return r;
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
-function serveOrder(orderId) { return transition(orderId, 'SERVE', {}, 'Serve order', 'Marking served…', 'Order served!'); }
 function confirmCounter(orderId) {
   const o = (state.orders || []).find(x => x.OrderID === orderId);
   if (o) openPaymentModal(o.OrderID, Number(o.GrandTotal || 0), Number(o.AmountPaid || 0));
@@ -2249,6 +2969,9 @@ async function rejectCounter(orderId) {
   if (reason !== null) return transition(orderId, 'REJECT_COUNTER', { reason }, 'Reject order', 'Rejecting…', 'Order rejected.');
 }
 
+/* ============================================================
+   PAYMENT MODAL & HYBRID PAYMENT LOGIC
+   ============================================================ */
 function openPaymentModal(orderId) {
   const o = (state.orders || []).find(x => x.OrderID === orderId);
   $('payOrderId').value = orderId;
@@ -2265,11 +2988,63 @@ function openPaymentModal(orderId) {
     $('payMethodOther').classList.add('d-none');
   }
   $('payRef').value = '';
+
+  if ($('payHybridToggle')) $('payHybridToggle').checked = false;
+  if ($('payHybridCash')) $('payHybridCash').value = '';
+  if ($('payHybridSecondAmt')) $('payHybridSecondAmt').value = '';
+  if ($('payHybridMethod')) $('payHybridMethod').value = 'GCash';
+  if ($('payHybridMethodOther')) {
+    $('payHybridMethodOther').value = '';
+    $('payHybridMethodOther').classList.add('d-none');
+  }
+  if ($('payHybridRef')) $('payHybridRef').value = '';
+  toggleHybridPaymentUI();
+
   $('payDeliveryToggle').checked = false;
   togglePayDeliveryUI();
   togglePaySeniorPwdUI();
   recalcPaymentSummary();
   showModal('paymentModal');
+}
+
+function toggleHybridPaymentUI() {
+  const isHybrid = $('payHybridToggle')?.checked || false;
+  $('singlePaymentFields')?.classList.toggle('d-none', isHybrid);
+  $('hybridPaymentFields')?.classList.toggle('d-none', !isHybrid);
+  if (isHybrid) {
+    if ($('payDeliveryToggle')) $('payDeliveryToggle').checked = false;
+    $('payDeliveryFields')?.classList.add('d-none');
+    recalcHybridPayment();
+  }
+}
+
+function onHybridMethodChange() {
+  const isOther = $('payHybridMethod')?.value === 'Other';
+  const otherEl = $('payHybridMethodOther');
+  if (otherEl) {
+    otherEl.classList.toggle('d-none', !isOther);
+    if (isOther) otherEl.focus();
+  }
+}
+
+function onHybridAmountInput(source) {
+  const due = parseFloat($('payDue')?.value) || 0;
+  if (source === 'cash') {
+    const cash = Math.max(0, parseFloat($('payHybridCash')?.value) || 0);
+    const rem = Math.max(0, due - cash);
+    if ($('payHybridSecondAmt')) $('payHybridSecondAmt').value = rem.toFixed(2);
+  }
+  recalcHybridPayment();
+}
+
+function recalcHybridPayment() {
+  const due = parseFloat($('payDue')?.value) || 0;
+  const cash = Math.max(0, parseFloat($('payHybridCash')?.value) || 0);
+  const secondAmt = Math.max(0, parseFloat($('payHybridSecondAmt')?.value) || 0);
+  const totalPaid = cash + secondAmt;
+  const change = Math.max(0, totalPaid - due);
+  if ($('payHybridTotalPaid')) $('payHybridTotalPaid').textContent = `${curr()}${totalPaid.toFixed(2)}`;
+  if ($('payHybridChange')) $('payHybridChange').textContent = `${curr()}${change.toFixed(2)}`;
 }
 
 function onPaymentMethodChange() {
@@ -2289,6 +3064,10 @@ function togglePaySeniorPwdUI() {
 }
 function togglePayDeliveryUI() {
   const on = $('payDeliveryToggle').checked;
+  if (on && $('payHybridToggle')?.checked) {
+    $('payHybridToggle').checked = false;
+    toggleHybridPaymentUI();
+  }
   $('payDeliveryFields').classList.toggle('d-none', !on);
   $('payMethod').disabled = on;
   const otherEl = $('payMethodOther');
@@ -2305,361 +3084,525 @@ function onDeliveryPlatformChange() {
 function recalcPaymentSummary() {
   const o = (state.orders || []).find(x => x.OrderID === $('payOrderId').value);
   const gross = o ? Number(o.Subtotal || 0) : 0;
-  const isSeniorPwd = $('paySeniorPwdToggle')?.checked || false;
-  const manualDiscount = parseFloat($('payDiscount')?.value) || 0;
-  const t = computeTotals(gross, isSeniorPwd, manualDiscount);
+  const alreadyPaid = o ? Number(o.AmountPaid || 0) : 0;
+  const isSenior = $('paySeniorPwdToggle').checked;
+  const seniorPct = getSeniorPct();
+  $('paySeniorPctLabel').textContent = seniorPct;
+  $('paySeniorPctHelp').textContent = seniorPct;
 
-  $('paySeniorPctLabel').textContent = t.seniorPct;
-  $('paySeniorPctHelp').textContent = t.seniorPct;
-  $('paySubtotalDisplay').textContent = `${curr()}${t.subtotal.toFixed(2)}`;
+  const pct = isSenior ? seniorPct : Math.min(50, Math.max(0, parseFloat($('payDiscount').value) || 0));
+  const t = computeTotals(gross, isSenior, pct);
+
+  $('paySubtotalDisplay').textContent = `${curr()}${gross.toFixed(2)}`;
+  $('payLessVatRowDisplay').classList.toggle('d-none', !t.vatExempt);
+  $('payLessVatPct').textContent = t.taxPct;
+  $('payLessVatDisplay').textContent = `-${curr()}${t.lessVat.toFixed(2)}`;
   $('payDiscountAmtDisplay').textContent = `-${curr()}${t.discount.toFixed(2)}`;
-
-  const lvRow = $('payLessVatRowDisplay');
-  if (lvRow) {
-    lvRow.classList.toggle('d-none', !(t.lessVat > 0));
-    $('payLessVatPct').textContent = t.parsedTax;
-    $('payLessVatDisplay').textContent = `-${curr()}${t.lessVat.toFixed(2)}`;
-  }
-  const taxRow = $('payTaxRowDisplay');
-  if (taxRow) {
-    const showAdded = !(t.enableTax && t.inclusive);
-    taxRow.classList.toggle('d-none', !showAdded);
-    if (showAdded) {
-      taxRow.innerHTML = t.enableTax
-        ? `<span class="text-secondary">VAT (${t.parsedTax}%)${isSeniorPwd ? ' - exempt' : ''}:</span><span class="fw-semibold">${curr()}${t.tax.toFixed(2)}</span>`
-        : `<span class="text-muted">Tax:</span><span class="badge bg-light text-secondary border">₱0.00 (No Tax)</span>`;
-    }
-  }
-  const srvRow = $('payServiceRowDisplay');
-  if (srvRow) {
-    srvRow.innerHTML = t.enableSrv
-      ? `<span class="text-secondary">Service (${t.parsedSrv}%):</span><span class="fw-semibold">${curr()}${t.srv.toFixed(2)}</span>`
-      : `<span class="text-muted">Service Charge:</span><span class="badge bg-light text-secondary border">₱0.00</span>`;
-  }
-  const info = $('payVatInfoDisplay');
-  if (info) {
-    if (t.enableTax && t.inclusive) {
-      info.classList.remove('d-none');
-      info.innerHTML = isSeniorPwd
-        ? `<div class="d-flex justify-content-between"><span>VAT-Exempt Sales</span><span>${curr()}${t.vatExemptSales.toFixed(2)}</span></div><div class="d-flex justify-content-between"><span>VAT (${t.parsedTax}%)</span><span>${curr()}0.00</span></div>`
-        : `<div class="d-flex justify-content-between"><span>VATable Sales</span><span>${curr()}${t.vatableSales.toFixed(2)}</span></div><div class="d-flex justify-content-between"><span>VAT (${t.parsedTax}%) included</span><span>${curr()}${t.tax.toFixed(2)}</span></div>`;
-    } else info.classList.add('d-none');
-  }
+  $('payTaxRowDisplay').classList.toggle('d-none', !t.taxOn);
+  $('payTaxDisplay').textContent = `${curr()}${t.tax.toFixed(2)}`;
+  $('payServiceRowDisplay').classList.toggle('d-none', !t.srvOn);
+  $('payServiceDisplay').textContent = `${curr()}${t.srv.toFixed(2)}`;
   $('payGrandTotalDisplay').textContent = `${curr()}${t.total.toFixed(2)}`;
-  const remaining = Math.max(0, t.total - (o ? Number(o.AmountPaid || 0) : 0));
-  $('payDue').value = remaining.toFixed(2);
-  if ($('payDeliveryToggle')?.checked) $('payReceived').value = remaining.toFixed(2);
-  calcChange();
-}
 
+  const vatInfo = $('payVatInfoDisplay');
+  if (t.taxOn) {
+    vatInfo.classList.remove('d-none');
+    vatInfo.innerHTML = `<div class="d-flex justify-content-between"><span>VATable Sales:</span><span>${curr()}${t.vatableSales.toFixed(2)}</span></div><div class="d-flex justify-content-between"><span>VAT-Exempt Sales:</span><span>${curr()}${t.vatExemptSales.toFixed(2)}</span></div><div class="d-flex justify-content-between"><span>VAT Amount (${t.taxPct}%):</span><span>${curr()}${t.tax.toFixed(2)}</span></div>`;
+  } else vatInfo.classList.add('d-none');
+
+  const due = Math.max(0, t.total - alreadyPaid);
+  $('payDue').value = due.toFixed(2);
+  if ($('payDeliveryToggle').checked) $('payReceived').value = due.toFixed(2);
+  calcChange();
+  if ($('payHybridToggle')?.checked) recalcHybridPayment();
+  return { t, due };
+}
 function calcChange() {
-  const due = parseFloat($('payDue').value) || 0;
-  const recv = parseFloat($('payReceived').value) || 0;
-  $('payChange').value = Math.max(0, recv - due).toFixed(2);
+  const due = parseFloat($('payDue').value) || 0, rec = parseFloat($('payReceived').value) || 0;
+  $('payChange').value = Math.max(0, rec - due).toFixed(2);
 }
 
 async function submitPayment() {
+  if (state.submitting) return;
   const orderId = $('payOrderId').value;
-  const o = (state.orders || []).find(x => x.OrderID === orderId);
-  const gross = o ? Number(o.Subtotal || 0) : 0;
-  const isSeniorPwd = $('paySeniorPwdToggle').checked;
-  const seniorPwdId = $('paySeniorPwdIdInput').value.trim();
-  const manualDiscount = parseFloat($('payDiscount').value) || 0;
-  if (isSeniorPwd && !seniorPwdId) return toast('Please enter Senior Citizen / PWD ID #.', 'warning');
+  const isSenior = $('paySeniorPwdToggle').checked;
+  const seniorId = $('paySeniorPwdIdInput').value.trim();
+  if (isSenior && !seniorId) return toast('Enter the Senior Citizen / PWD ID number.', 'warning');
 
-  const computedTotals = computeTotals(gross, isSeniorPwd, manualDiscount);
-  const due = computedTotals.total - (o ? Number(o.AmountPaid || 0) : 0);
   const isDelivery = $('payDeliveryToggle').checked;
+  const isHybrid = $('payHybridToggle')?.checked || false;
   let deliveryPlatform = '';
-  let resolvedPaymentMethod = $('payMethod').value;
+  let paymentMethod = '';
+  let referenceNumber = '';
+  let rec = 0;
+  let changeAmount = 0;
 
-  if (isDelivery) {
-    resolvedPaymentMethod = 'Delivery';
-    deliveryPlatform = $('payDeliveryPlatform').value;
-    if (deliveryPlatform === 'Others') deliveryPlatform = $('payDeliveryOther').value.trim();
-    if (!deliveryPlatform) return toast('Please enter the delivery platform name.', 'warning');
-  } else if (resolvedPaymentMethod === 'Other') {
-    resolvedPaymentMethod = ($('payMethodOther')?.value || '').trim();
-    if (!resolvedPaymentMethod) {
+  const summary = recalcPaymentSummary();
+  const due = parseFloat($('payDue').value) || 0;
+
+  if (isHybrid) {
+    const cashAmt = Math.max(0, parseFloat($('payHybridCash')?.value) || 0);
+    const secondAmt = Math.max(0, parseFloat($('payHybridSecondAmt')?.value) || 0);
+    const secondRaw = $('payHybridMethod')?.value || 'GCash';
+    const secondCustom = ($('payHybridMethodOther')?.value || '').trim();
+    if (secondRaw === 'Other' && !secondCustom) {
+      $('payHybridMethodOther')?.focus();
+      return toast('Enter the second payment method name.', 'warning');
+    }
+    const secondLabel = secondRaw === 'Other' ? secondCustom : secondRaw;
+    rec = cashAmt + secondAmt;
+
+    if (rec + 0.001 < due) {
+      return toast('Combined Cash + ' + secondLabel + ' payment is less than Amount Due.', 'warning');
+    }
+    changeAmount = Math.max(0, rec - due);
+    paymentMethod = `Hybrid (Cash + ${secondLabel})`;
+    const refInput = ($('payHybridRef')?.value || '').trim();
+    const splitNote = `Cash: ${cashAmt.toFixed(2)}, ${secondLabel}: ${secondAmt.toFixed(2)}`;
+    referenceNumber = refInput ? `${splitNote} | Ref: ${refInput}` : splitNote;
+  } else {
+    rec = parseFloat($('payReceived').value) || 0;
+    if (rec + 0.001 < due) return toast('Amount received is less than Amount Due.', 'warning');
+    changeAmount = Math.max(0, rec - due);
+
+    const selectedMethod = $('payMethod').value;
+    const customMethod = ($('payMethodOther')?.value || '').trim();
+    if (!isDelivery && selectedMethod === 'Other' && !customMethod) {
       $('payMethodOther')?.focus();
       return toast('Please enter the payment method name.', 'warning');
     }
+
+    if (isDelivery) {
+      const sel = $('payDeliveryPlatform').value;
+      deliveryPlatform = sel === 'Others' ? $('payDeliveryOther').value.trim() : sel;
+      if (!deliveryPlatform) return toast('Enter the delivery platform name.', 'warning');
+    }
+
+    paymentMethod = isDelivery ? 'Delivery' : (selectedMethod === 'Other' ? customMethod : selectedMethod);
+    referenceNumber = $('payRef').value.trim();
   }
 
-  const received = isDelivery ? Math.max(0, due) : (parseFloat($('payReceived').value) || 0);
-  if (received + 0.001 < due) return toast(`Insufficient payment amount. Remaining due: ${due.toFixed(2)}`, 'warning');
-
-  const id = uuid();
+  state.submitting = true;
   const payload = {
-    orderId, amountReceived: received, paymentMethod: resolvedPaymentMethod,
-    referenceNumber: $('payRef').value, clientId: id, customerName: $('payCustomerName').value || 'Walk-In Customer',
-    isSeniorPwd, seniorPwdId, discount: manualDiscount, discountReason: $('payDiscountReason').value || '',
-    computedTotals, isDelivery, deliveryPlatform
+    orderId,
+    customerName: $('payCustomerName').value.trim(),
+    isSeniorPwd: isSenior,
+    seniorPwdId: isSenior ? seniorId : '',
+    discount: isSenior ? getSeniorPct() : (parseFloat($('payDiscount').value) || 0),
+    discountReason: isSenior ? '' : $('payDiscountReason').value.trim(),
+    deliveryPlatform,
+    paymentMethod,
+    amountReceived: rec,
+    changeAmount,
+    referenceNumber,
+    computedTotals: summary.t
   };
 
   try {
     showLoading('Processing payment…');
-    const r = await runAction('processPayment', [payload], id, 'Payment');
-    const change = r.queued ? Math.max(0, received - due) : Number(r.res.changeAmount || 0);
-    showDone(`Payment complete! Change: ${curr()}${change.toFixed(2)}`, async () => {
-      hideModal('paymentModal');
-      if (!r.queued) await poll();
-      await openReceiptModal(orderId);
+    const r = await runAction('processPayment', [payload], null, 'Process payment');
+    showDone(r.queued ? 'Payment saved offline — will sync' : `Payment complete! Change: ${curr()}${Number(r.res.changeAmount || 0).toFixed(2)}`, () => {
+      hideModal('paymentModal'); openReceiptModal(orderId); if (!r.queued) poll();
     });
-  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
+  } catch (err) { hideLoading(); toast(err.message, 'danger'); } finally { state.submitting = false; }
+}
+
+function kitchenAccept(id) { return transition(id, 'ACCEPT_KITCHEN', {}, 'Accept order', 'Accepting…', 'Order accepted!'); }
+function kitchenStartPrep(id) {
+  const inp = $(`prep_${id}`); const mins = (inp && inp.value) || state.prepInputs[id] || 15; delete state.prepInputs[id];
+  return transition(id, 'START_PREP', { prepMinutes: mins }, 'Start prep', 'Starting preparation…', 'Preparation started!');
+}
+function kitchenReady(id) { return transition(id, 'MARK_READY', {}, 'Mark ready', 'Marking ready…', 'Order marked READY!'); }
+
+/* ============================================================
+   ORDER MODAL & BASKET
+   ============================================================ */
+function openOrderModal() {
+  state.cart = [];
+  const ts = $('cartTableSelect');
+  ts.innerHTML = '<option value="|Takeout">Takeout</option>' + (state.tables || []).map(t => `<option value="${escapeHtml(t.TableID)}|${escapeHtml(t.TableNumber)}">${escapeHtml(t.TableNumber)} (${escapeHtml(t.Status)})</option>`).join('');
+  state.activeCategoryFilter = 'ALL';
+  $('menuSearch').value = '';
+  renderPOSCategoryTabs(); renderPOSMenu(); updateCartDisplay();
+  showModal('orderModal');
+}
+
+function renderPOSCategoryTabs() {
+  const c = $('posCategoryTabs'); if (!c) return;
+  const cats = [{ id: 'ALL', name: 'All Items' }].concat((state.categories || []).map(x => ({ id: String(x.CategoryID), name: x.CategoryName })));
+  setHtml(c, cats.map(x => `<button type="button" class="btn btn-sm ${state.activeCategoryFilter === x.id ? 'btn-warning fw-bold' : 'btn-outline-secondary'} text-nowrap" onclick="selectPOSCategory('${escapeHtml(x.id)}')">${escapeHtml(x.name)}</button>`).join(''));
+}
+function selectPOSCategory(id) { state.activeCategoryFilter = id; renderPOSCategoryTabs(); renderPOSMenu(); }
+const onMenuSearch = debounce(() => renderPOSMenu(), 120);
+
+function renderPOSMenu() {
+  const q = ($('menuSearch')?.value || '').toLowerCase();
+  const catFilter = state.activeCategoryFilter || 'ALL';
+  const items = (state.menu || []).filter(m =>
+    (m.Available === true || String(m.Available).toLowerCase() === 'true') &&
+    (catFilter === 'ALL' || String(m.CategoryID) === String(catFilter)) &&
+    (!q || String(m.ItemName || '').toLowerCase().includes(q) || String(m.Category || '').toLowerCase().includes(q))
+  );
+  setHtml($('posMenuGrid'), items.length ? items.map(m => {
+    const price = resolveMenuPrice(m);
+    const imgSrc = m.ImageURL && String(m.ImageURL).trim() ? escapeHtml(m.ImageURL.trim()) : FOOD_PLACEHOLDER;
+    return `<div class="col-6 col-md-4"><div class="card card-pos p-2 h-100 text-center" style="cursor:pointer;" onclick="addToCart('${escapeHtml(m.MenuItemID)}')">
+      <img src="${imgSrc}" class="img-fluid rounded mb-2" style="height:80px; object-fit:cover; background:#e2e8f0;" onerror="this.onerror=null;this.src='${FOOD_PLACEHOLDER}'">
+      <h6 class="mb-1 small fw-bold">${escapeHtml(m.ItemName)}</h6><span class="text-danger fw-bold">${curr()}${price.toFixed(2)}</span>
+    </div></div>`;
+  }).join('') : '<div class="col-12 text-center text-muted py-4">No menu items found.</div>');
+}
+
+function addToCart(id) {
+  const item = state.menuById[id];
+  if (!item) return;
+  const price = resolveMenuPrice(item);
+  const existing = state.cart.find(c => c.menuItemId === id);
+  if (existing) existing.quantity++;
+  else state.cart.push({ menuItemId: id, itemName: item.ItemName, price, quantity: 1, station: item.Station || 'Kitchen' });
+  updateCartDisplay();
+}
+
+function updateCartDisplay() {
+  const list = $('cartItemsList');
+  if (!state.cart.length) { setHtml(list, '<p class="text-muted text-center">Basket is empty</p>'); $('cartSubtotal').textContent = `${curr()}0.00`; return; }
+  let sub = 0;
+  setHtml(list, state.cart.map((c, idx) => {
+    const unitPrice = Number(c.price || 0);
+    sub += unitPrice * c.quantity;
+    return `<div class="d-flex justify-content-between align-items-center mb-2 border-bottom pb-1">
+      <div><strong>${escapeHtml(c.itemName)}</strong><br><small class="text-muted">${curr()}${unitPrice.toFixed(2)} × ${c.quantity}</small></div>
+      <div class="btn-group btn-group-sm"><button class="btn btn-outline-secondary" onclick="changeQty(${idx}, -1)">-</button><button class="btn btn-outline-secondary" onclick="changeQty(${idx}, 1)">+</button></div>
+    </div>`;
+  }).join(''));
+  $('cartSubtotal').textContent = `${curr()}${sub.toFixed(2)}`;
+}
+function changeQty(idx, d) { state.cart[idx].quantity += d; if (state.cart[idx].quantity <= 0) state.cart.splice(idx, 1); updateCartDisplay(); }
+
+async function submitOrder() {
+  if (state.submitting) return;
+  if (!state.cart.length) return toast('Add items to the basket first.', 'warning');
+  state.submitting = true;
+  const tv = $('cartTableSelect').value.split('|');
+  const subtotal = state.cart.reduce((s, c) => s + Number(c.price || 0) * c.quantity, 0);
+  const clientId = uuid();
+  const payload = {
+    clientId, tableId: tv[0] || '', tableNumber: tv.slice(1).join('|'),
+    items: state.cart.map(c => ({ menuItemId: c.menuItemId, itemName: c.itemName, price: Number(c.price || 0), quantity: c.quantity, station: c.station })),
+    subtotal
+  };
+  try {
+    showLoading('Submitting order…');
+    const r = await runAction('createOrder', [payload], clientId, 'New order');
+    const createdOrderId = (r && r.res && r.res.orderId) ? r.res.orderId : clientId;
+    showDone(r.queued ? 'Order saved offline — will sync' : `Order ${r.res.orderNumber} placed!`, async () => {
+      state.cart = [];
+      hideModal('orderModal');
+      if (!r.queued) await poll(true);
+      openPaymentModal(createdOrderId);
+    });
+  } catch (err) { hideLoading(); toast(err.message, 'danger'); } finally { state.submitting = false; }
+}
+
+/* ============================================================
+   VAT & TOTALS COMPUTATION + RECEIPT RENDERING
+   ============================================================ */
+function computeTotals(gross, isSeniorPwd, manualDiscountPct) {
+  const s = state.settings;
+  const taxPct = parseFloat(s.TAX_RATE) || 0;
+  const srvPct = parseFloat(s.SERVICE_CHARGE_PERCENT) || 0;
+  const taxOn = (s.ENABLE_TAX === 'true' || s.ENABLE_TAX === true) && taxPct > 0;
+  const srvOn = (s.ENABLE_SERVICE_CHARGE === 'true' || s.ENABLE_SERVICE_CHARGE === true) && srvPct > 0;
+  const vatInc = s.VAT_INCLUSIVE !== 'false' && s.VAT_INCLUSIVE !== false;
+  const r2 = n => Math.round(n * 100) / 100;
+
+  if (isSeniorPwd) {
+    const seniorPct = getSeniorPct();
+    const base = (taxOn && vatInc) ? gross / (1 + taxPct / 100) : gross;
+    const lessVat = r2(gross - base), discount = r2(base * seniorPct / 100), net = Math.max(0, r2(base - discount));
+    const srv = srvOn ? r2(net * srvPct / 100) : 0;
+    return { subtotal: r2(gross), vatExempt: true, lessVat, discount, vatableSales: 0, vatExemptSales: net, tax: 0, srv, total: r2(net + srv), taxOn, srvOn, taxPct, srvPct };
+  }
+  const discount = r2(gross * (manualDiscountPct || 0) / 100), afterDisc = Math.max(0, r2(gross - discount));
+  const srv = srvOn ? r2(afterDisc * srvPct / 100) : 0;
+  let vatableSales = 0, tax = 0, total = 0;
+  if (taxOn) {
+    if (vatInc) { vatableSales = r2(afterDisc / (1 + taxPct / 100)); tax = r2(afterDisc - vatableSales); total = r2(afterDisc + srv); }
+    else { vatableSales = afterDisc; tax = r2(afterDisc * taxPct / 100); total = r2(afterDisc + tax + srv); }
+  } else { total = r2(afterDisc + srv); }
+  return { subtotal: r2(gross), vatExempt: false, lessVat: 0, discount, vatableSales, vatExemptSales: 0, tax, srv, total, taxOn, srvOn, taxPct, srvPct };
+}
+
+function buildReceiptHtml(data) {
+  const o = data.order || {}, items = data.items || [], payments = data.payments || [], s = data.settings || {};
+  const c = s.CURRENCY_SYMBOL || '₱', d = o.CreatedAt ? new Date(o.CreatedAt) : new Date();
+  const num = v => Number(v || 0), r2 = v => Math.round(num(v) * 100) / 100;
+  const row = (l, v, b) => `<div style="display:flex;justify-content:space-between;${b ? 'font-weight:bold;' : ''}"><span>${l}</span><span>${v}</span></div>`;
+  const paid = payments.reduce((sum, p) => sum + num(p.AmountPaid), 0);
+  const change = payments.reduce((sum, p) => sum + num(p.ChangeAmount), 0);
+  const sub = num(o.Subtotal), disc = num(o.Discount), tax = num(o.Tax), srv = num(o.ServiceCharge), total = num(o.GrandTotal);
+  const isSenior = o.DiscountType === 'Senior/PWD';
+  const taxPct = parseFloat(s.TAX_RATE) || 0, taxOn = (s.ENABLE_TAX === 'true' || s.ENABLE_TAX === true) && taxPct > 0;
+  const vatInc = s.VAT_INCLUSIVE !== 'false' && s.VAT_INCLUSIVE !== false;
+  const lessVat = o.LessVat !== undefined && o.LessVat !== '' ? num(o.LessVat) : (isSenior && taxOn && vatInc ? r2(sub - sub / (1 + taxPct / 100)) : 0);
+  const vatExemptSales = o.VatExemptSales !== undefined && o.VatExemptSales !== '' ? num(o.VatExemptSales) : (isSenior ? r2(sub - lessVat - disc) : 0);
+  const vatableSales = o.VatableSales !== undefined && o.VatableSales !== '' ? num(o.VatableSales) : (!isSenior && taxOn ? r2(vatInc ? (sub - disc) / (1 + taxPct / 100) : (sub - disc)) : 0);
+  const activeBr = (state.branches || []).find(b => b.BranchID === (o.BranchID || state.activeBranchId));
+
+  return `
+    <div style="text-align:center;font-weight:bold;font-size:15px;">${escapeHtml(s.RESTAURANT_NAME || 'Tuna Choice POS')}</div>
+    ${activeBr ? `<div style="text-align:center;font-size:11px;">${escapeHtml(activeBr.BranchName)} (${escapeHtml(activeBr.BranchCode)})</div>` : ''}
+    ${activeBr?.Address ? `<div style="text-align:center;font-size:10px;">${escapeHtml(activeBr.Address)}</div>` : ''}
+    <div style="text-align:center;font-size:11px;">OFFICIAL RECEIPT</div><div style="border-bottom:1px dashed #000;margin:6px 0;"></div>
+    <div style="font-size:11px;">
+      ${row('Order #:', escapeHtml(o.OrderNumber))} ${row('Date:', `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`)}
+      ${row('Table:', escapeHtml(o.TableNumber || 'Takeout'))} ${row('Customer:', escapeHtml(o.CustomerName || 'Walk-In'))}
+      ${o.SeniorPwdId ? row('SC/PWD ID:', escapeHtml(o.SeniorPwdId)) : ''}
+    </div><div style="border-bottom:1px dashed #000;margin:6px 0;"></div>
+    <div style="font-size:12px;">${items.map(i => `<div style="margin-bottom:3px;"><div style="font-weight:bold;">${escapeHtml(i.ItemNameSnapshot)}</div>${row(`${i.Quantity} x ${c}${num(i.UnitPriceSnapshot).toFixed(2)}`, `${c}${(i.Quantity * num(i.UnitPriceSnapshot)).toFixed(2)}`)}</div>`).join('')}</div>
+    <div style="border-bottom:1px dashed #000;margin:6px 0;"></div>
+    <div style="font-size:12px;">
+      ${row('Subtotal:', `${c}${sub.toFixed(2)}`)}
+      ${lessVat > 0 ? row(`Less: VAT-Exempt (${taxPct}%):`, `-${c}${lessVat.toFixed(2)}`) : ''}
+      ${disc > 0 ? row(`Discount${o.DiscountReason ? ' (' + escapeHtml(o.DiscountReason) + ')' : ''}:`, `-${c}${disc.toFixed(2)}`) : ''}
+      ${tax > 0 ? row(`Tax (${taxPct}%):`, `${c}${tax.toFixed(2)}`) : ''}
+      ${srv > 0 ? row(`Service (${s.SERVICE_CHARGE_PERCENT || 0}%):`, `${c}${srv.toFixed(2)}`) : ''}
+      <div style="border-top:1px solid #000;margin-top:4px;padding-top:4px;font-size:14px;">${row('TOTAL:', `${c}${total.toFixed(2)}`, true)}</div>
+    </div>
+    ${taxOn || isSenior ? `<div style="border-top:1px dashed #000;margin:6px 0;padding-top:4px;font-size:11px;">${row('VATable Sales:', `${c}${vatableSales.toFixed(2)}`)}${row('VAT-Exempt Sales:', `${c}${vatExemptSales.toFixed(2)}`)}${row(`VAT Amount (${taxPct}%):`, `${c}${tax.toFixed(2)}`)}</div>` : ''}
+    ${payments.length ? `<div style="border-top:1px dashed #000;margin:6px 0;padding-top:4px;font-size:11px;">${payments.map(p => row('Paid (' + escapeHtml(p.PaymentMethod) + '):', `${c}${num(p.AmountPaid).toFixed(2)}`) + (p.ReferenceNumber ? `<div style="font-size:10px;color:#333;">${escapeHtml(p.ReferenceNumber)}</div>` : '')).join('')}${row('Change:', `${c}${change.toFixed(2)}`, true)}</div>` : ''}
+    <div style="text-align:center;font-size:11px;margin-top:10px;">${escapeHtml(s.RECEIPT_FOOTER || 'Thank you!')}</div>`;
 }
 
 async function openReceiptModal(orderId) {
   try {
-    showLoading('Loading receipt preview…');
-    const data = await callServerT(20000, 'getReceiptData', state.token, orderId);
-    hideLoading();
-    renderReceiptPreview(data);
-    syncPrintModeSelects();
-    showModal('receiptModal');
-  } catch (err) { hideLoading(); toast('Error loading receipt: ' + err.message, 'danger'); }
-}
-
-function renderReceiptPreview(data) {
-  const o = data.order || {}, items = data.items || [], payments = data.payments || [], s = data.settings || {};
-  const c = s.CURRENCY_SYMBOL || '₱', fmt = (n) => c + Number(n || 0).toFixed(2);
-  const lastPay = payments.length ? payments[payments.length - 1] : {};
-  const dt = new Date(o.CreatedAt || Date.now());
-  const taxPct = parseFloat(s.TAX_RATE_PERCENT) || 12;
-  const inclusive = s.VAT_INCLUSIVE !== 'false';
-  const lessVat = Number(o.LessVat || 0), disc = Number(o.Discount || 0), svc = Number(o.ServiceCharge || 0), taxAmt = Number(o.Tax || 0);
-  const row = (a, b, bold) => `<div style="display:flex; justify-content:space-between;${bold ? ' font-weight:bold; font-size:0.95rem; margin-top:4px;' : ''}"><span>${a}</span><span>${b}</span></div>`;
-  let receiptRows = row('Subtotal', fmt(o.Subtotal));
-  if (lessVat > 0) receiptRows += row(`Less: VAT (${taxPct}%)`, '-' + fmt(lessVat));
-  if (disc > 0) receiptRows += row(`Discount ${o.DiscountReason ? '(' + escapeHtml(o.DiscountReason) + ')' : ''}`, '-' + fmt(disc));
-  if (svc > 0) receiptRows += row('Service Charge', fmt(svc));
-  if (!inclusive) receiptRows += row(taxAmt > 0 ? `VAT (${taxPct}%)` : 'Tax', fmt(taxAmt));
-  receiptRows += row('Total', fmt(o.GrandTotal), true);
-  if (inclusive) {
-    receiptRows += '<div style="border-top:1px dashed #000; margin:6px 0 4px;"></div>';
-    if (Number(o.VatableSales || 0) > 0) receiptRows += row('VATable Sales', fmt(o.VatableSales));
-    if (Number(o.VatExemptSales || 0) > 0) receiptRows += row('VAT-Exempt Sales', fmt(o.VatExemptSales));
-    receiptRows += row(`VAT (${taxPct}%)`, fmt(taxAmt));
-  }
-  $('receiptPreviewContent').innerHTML = `
-    <div style="text-align:center; font-weight:bold; font-size:1.1rem;">${escapeHtml(s.RESTAURANT_NAME || 'Tuna Choice POS')}</div>
-    <div style="text-align:center; font-size:0.8rem; margin-bottom:4px;">${o.TableNumber ? 'Table: ' + escapeHtml(o.TableNumber) : 'Takeout'}</div>
-    <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    <div style="font-size:0.8rem; display:flex; justify-content:space-between;"><span>Order: ${escapeHtml(o.OrderNumber)}</span><span>${dt.toLocaleDateString()}</span></div>
-    <div style="font-size:0.8rem; display:flex; justify-content:space-between; margin-bottom:4px;"><span>Customer: ${escapeHtml(o.CustomerName || 'Walk-In')}</span><span>${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
-    <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    <div style="font-size:0.85rem;">${items.map(i => `<div style="display:flex; justify-content:space-between; margin-bottom:2px;"><span>${i.Quantity}x ${escapeHtml(i.ItemNameSnapshot)}</span><span>${fmt(Number(i.UnitPriceSnapshot) * Number(i.Quantity))}</span></div>`).join('')}</div>
-    <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    <div style="font-size:0.8rem;">${receiptRows}</div>
-    <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    <div style="font-size:0.8rem;">
-      <div style="display:flex; justify-content:space-between;"><span>Paid (${escapeHtml(lastPay.PaymentMethod || 'Cash')})</span><span>${fmt(o.AmountPaid)}</span></div>
-      <div style="display:flex; justify-content:space-between;"><span>Change</span><span>${fmt(lastPay.ChangeAmount || 0)}</span></div>
-    </div>
-    <div style="border-bottom:1px dashed #000; margin:8px 0;"></div>
-    <div style="text-align:center; font-size:0.75rem; margin-top:6px;">${escapeHtml(s.RECEIPT_FOOTER || 'Thank you for dining with us!')}</div>`;
-}
-function printReceipt() {
-  const c = $('receiptPreviewContent');
-  if (c) printHtmlDocument('Print Receipt', c.innerHTML);
-}
-
-function kitchenAccept(orderId) { return transition(orderId, 'ACCEPT_KITCHEN', {}, 'Accept order', 'Accepting…', 'Order accepted!'); }
-async function kitchenStartPrep(orderId) {
-  const mins = parseInt($(`prep_${orderId}`)?.value || 15, 10) || 15;
-  const r = await transition(orderId, 'START_PREP', { prepMinutes: mins }, 'Start prep', 'Starting prep…', 'Prep started!');
-  if (r) delete state.prepInputs[orderId];
-}
-function kitchenReady(orderId) { return transition(orderId, 'MARK_READY', {}, 'Mark ready', 'Marking ready…', 'Order ready!'); }
-
-function openOrderModal() {
-  state.cart = []; state.activeCategoryFilter = 'ALL';
-  $('menuSearch').value = '';
-  const avail = (state.tables || []).filter(t => t.Status === 'Available');
-  $('cartTableSelect').innerHTML = `<option value="">-- Takeout / Walk-In --</option>` +
-    avail.map(t => `<option value="${escapeHtml(t.TableID)}|${escapeHtml(t.TableNumber)}">${escapeHtml(t.TableNumber)}</option>`).join('');
-  renderPOSCategoryTabs(); renderPOSMenu(); updateCartDisplay(); showModal('orderModal');
-}
-function renderPOSCategoryTabs() {
-  const container = $('posCategoryTabs');
-  if (!container) return;
-  let html = `<button type="button" class="btn btn-sm ${state.activeCategoryFilter === 'ALL' ? 'btn-primary' : 'btn-outline-secondary'} rounded-pill px-3" onclick="selectPOSCategory('ALL')">All</button>`;
-  (state.categories || []).forEach(c => {
-    html += `<button type="button" class="btn btn-sm ${state.activeCategoryFilter === c.CategoryID ? 'btn-primary' : 'btn-outline-secondary'} rounded-pill px-3" onclick="selectPOSCategory('${escapeHtml(c.CategoryID)}')">${escapeHtml(c.CategoryName)}</button>`;
-  });
-  container.innerHTML = html;
-}
-function selectPOSCategory(catId) { state.activeCategoryFilter = catId; renderPOSCategoryTabs(); renderPOSMenu(); }
-const onMenuSearch = debounce(() => renderPOSMenu(), 120);
-function renderPOSMenu() {
-  const term = ($('menuSearch')?.value || '').toLowerCase();
-  const items = (state.menu || []).filter(m => {
-    const isAvail = m.Available !== false && m.Available !== 'false';
-    const name = String(m.ItemName || m.Name || '').toLowerCase();
-    const matchesSearch = !term || name.includes(term);
-    const matchesCategory = state.activeCategoryFilter === 'ALL' || String(m.CategoryID) === String(state.activeCategoryFilter);
-    return isAvail && matchesSearch && matchesCategory;
-  });
-  const grid = $('posMenuGrid');
-  if (!grid) return;
-  grid.innerHTML = items.length ? items.map(m => {
-    const id = m.MenuItemID || m.ItemID;
-    const name = m.ItemName || m.Name || 'Item';
-    const price = resolveMenuPrice(m);
-    return `<div class="col-6 col-md-4">
-      <div class="card card-pos p-2 text-center h-100" style="cursor:pointer" onclick="addToCart('${escapeHtml(id)}')">
-        <img src="${escapeHtml(m.ImageURL || FOOD_PLACEHOLDER)}" loading="lazy" class="rounded mb-2" style="height:70px; object-fit:cover; width:100%;">
-        <h6 class="small fw-bold mb-1 text-truncate">${escapeHtml(name)}</h6>
-        <span class="text-danger fw-bold small">${curr()}${price.toFixed(2)}</span>
-      </div>
-    </div>`;
-  }).join('') : '<div class="col-12 text-center text-muted py-4">No available menu items found.</div>';
-}
-function addToCart(menuItemId) {
-  const item = state.menuById[menuItemId];
-  if (!item) return;
-  const name = item.ItemName || item.Name || 'Item';
-  const price = resolveMenuPrice(item);
-  const existing = state.cart.find(c => c.menuItemId === menuItemId);
-  if (existing) existing.quantity++;
-  else state.cart.push({ menuItemId, itemName: name, price, quantity: 1, station: item.Station });
-  updateCartDisplay();
-}
-function computeTotals(gross, isSeniorPwd, manualDiscount) {
-  const s = state.settings;
-  const parsedTax = parseFloat(s.TAX_RATE_PERCENT ?? 12);
-  const parsedSrv = parseFloat(s.SERVICE_CHARGE_PERCENT ?? 5);
-  const enableTax = (s.ENABLE_TAX !== 'false') && (parsedTax > 0);
-  const enableSrv = (s.ENABLE_SERVICE_CHARGE !== 'false') && (parsedSrv > 0);
-  const inclusive = s.VAT_INCLUSIVE !== 'false';
-  const seniorPct = getSeniorPct();
-  const vr = parsedTax / 100, sr = enableSrv ? parsedSrv / 100 : 0;
-  const r2 = n => Math.round((n + Number.EPSILON) * 100) / 100;
-
-  gross = r2(gross);
-  let discount = 0, lessVat = 0, base = 0, service = 0, vat = 0, total = 0, vatableSales = 0, vatExemptSales = 0;
-
-  if (isSeniorPwd) {
-    if (enableTax && inclusive) {
-      const vatEx = r2(gross / (1 + vr));
-      lessVat = r2(gross - vatEx);
-      discount = r2(vatEx * seniorPct / 100);
-      base = r2(vatEx - discount);
-    } else {
-      discount = r2(gross * seniorPct / 100);
-      base = r2(gross - discount);
+    showLoading('Loading receipt…');
+    let data = null;
+    if (navigator.onLine) {
+      try { data = await callServerT(12000, 'getReceiptData', state.token, orderId); } catch (e) { if (!e.isNetwork) throw e; }
     }
-    service = r2(base * sr);
-    total = r2(base + service);
-    vatExemptSales = total;
-  } else {
-    const pct = Math.min(Math.max(0, manualDiscount || 0), 50);
-    discount = r2(gross * pct / 100);
-    base = r2(gross - discount);
-    service = r2(base * sr);
-    if (enableTax) {
-      if (inclusive) {
-        total = r2(base + service);
-        vatableSales = r2(total / (1 + vr));
-        vat = r2(total - vatableSales);
-      } else {
-        vatableSales = r2(base + service);
-        vat = r2(vatableSales * vr);
-        total = r2(vatableSales + vat);
-      }
-    } else total = r2(base + service);
-  }
-  return { gross, subtotal: gross, discount, lessVat, tax: vat, srv: service, service, total, vatableSales, vatExemptSales, inclusive, parsedTax, parsedSrv, enableTax, enableSrv, seniorPct };
-}
-function updateCartDisplay() {
-  const list = $('cartItemsList');
-  if (!list) return;
-  list.innerHTML = state.cart.map((it, idx) => `
-    <div class="d-flex justify-content-between align-items-center small mb-1">
-      <span>${escapeHtml(it.itemName)} ×${it.quantity}</span>
-      <div><span class="me-2 fw-bold">${curr()}${(it.price * it.quantity).toFixed(2)}</span><button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="removeFromCart(${idx})">×</button></div>
-    </div>`).join('');
-  const gross = state.cart.reduce((s, i) => s + i.price * i.quantity, 0);
-  $('cartSubtotal').textContent = `${curr()}${gross.toFixed(2)}`;
-}
-function removeFromCart(idx) { state.cart.splice(idx, 1); updateCartDisplay(); }
-async function submitOrder() {
-  if (state.submitting || state.cart.length === 0) return toast('Cart is empty.', 'warning');
-  const selVal = $('cartTableSelect').value;
-  let tableId = '', tableNumber = '';
-  if (selVal) { const parts = selVal.split('|'); tableId = parts[0]; tableNumber = parts.slice(1).join('|'); }
-  const gross = state.cart.reduce((s, i) => s + i.price * i.quantity, 0);
-  const id = uuid();
-  state.submitting = true;
-  try {
-    showLoading('Submitting order…');
-    const r = await runAction('createOrder', [{ clientId: id, tableId, tableNumber, subtotal: gross, items: state.cart.map(i => ({ ...i })) }], id, 'New order');
-    showDone(`Order ${r.res.orderNumber} submitted!`, () => {
-      hideModal('orderModal');
-      if (state.user && ['Counter', 'Manager', 'Admin'].includes(state.user.role)) switchView('counter');
-      if (!r.queued) poll(true);
-    });
+    if (!data) {
+      const o = (state.orders || []).find(x => x.OrderID === orderId);
+      if (!o) throw new Error('Order not found');
+      data = { order: o, items: o.items || [], payments: state.localPayments[orderId] || [], settings: state.settings };
+    }
+    hideLoading();
+    $('receiptPreviewContent').innerHTML = buildReceiptHtml(data);
+    syncPrintModeSelects(); showModal('receiptModal');
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
-  finally { state.submitting = false; }
 }
+function printReceipt() { printHtmlDocument('Receipt', $('receiptPreviewContent').innerHTML); }
+function printSystemHelpGuide() { const body = document.querySelector('#helpModal .modal-body'); if (body) printHtmlDocument('Tuna Choice POS — Operations Guide', body.innerHTML); }
 
 /* ============================================================
-   ADMIN FORMS, MENU CSV IMPORT/EXPORT & REPORTS
+   ADMIN: SETTINGS, MENU, TABLES, CATEGORIES, USERS, REPORTS, EOD
    ============================================================ */
-function compressImageFile(file) {
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const sc = Math.min(1, 360 / Math.max(img.width, img.height));
-        const c = document.createElement('canvas');
-        c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
-        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-        resolve(c.toDataURL('image/jpeg', 0.7));
-      };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-async function previewMenuImage(input) {
-  if (input.files && input.files[0]) {
-    const dataUrl = await compressImageFile(input.files[0]);
-    $('cfgMenuImageUrl').value = dataUrl;
-    $('cfgMenuImagePreview').src = dataUrl;
-    $('cfgMenuImagePreview').classList.remove('d-none');
-    $('cfgMenuNoImgText').classList.add('d-none');
+function populateAdminForms() {
+  const s = state.settings;
+  $('cfgRestaurantName').value = s.RESTAURANT_NAME || 'Tuna Choice POS';
+  $('cfgTaxRate').value = s.TAX_RATE || '12';
+  $('cfgEnableTax').checked = s.ENABLE_TAX === 'true' || s.ENABLE_TAX === true;
+  $('cfgServiceCharge').value = s.SERVICE_CHARGE_PERCENT || '5';
+  $('cfgEnableServiceCharge').checked = s.ENABLE_SERVICE_CHARGE === 'true' || s.ENABLE_SERVICE_CHARGE === true;
+  $('cfgCurrency').value = s.CURRENCY_SYMBOL || '₱';
+  $('cfgTimezone').value = s.TIMEZONE || 'Asia/Manila';
+  $('cfgDisableKds').checked = isKdsDisabled();
+  $('cfgReceiptFooter').value = s.RECEIPT_FOOTER || '';
+  $('cfgSeniorPwdDiscount').value = s.SENIOR_PWD_DISCOUNT_PERCENT || '20';
+  $('cfgVatInclusive').checked = s.VAT_INCLUSIVE !== 'false' && s.VAT_INCLUSIVE !== false;
+
+  // Populate Role dropdown: only Admin can assign Admin role
+  const roleSel = $('cfgUserRole');
+  if (roleSel) {
+    const roles = isGlobalAdmin()
+      ? ['Waiter', 'Counter', 'Kitchen', 'Manager', 'Admin']
+      : ['Waiter', 'Counter', 'Kitchen', 'Manager'];
+    roleSel.innerHTML = roles.map(r => `<option value="${r}">${r}</option>`).join('');
   }
+
+  $('cfgMenuCategory').innerHTML = (state.categories || []).map(c => `<option value="${escapeHtml(c.CategoryID)}">${escapeHtml(c.CategoryName)}</option>`).join('');
+
+  const catFilterEl = $('adminMenuCatFilter');
+  if (catFilterEl) {
+    const prevVal = catFilterEl.value || 'ALL';
+    catFilterEl.innerHTML = '<option value="ALL">All Categories</option>' +
+      (state.categories || []).map(c => `<option value="${escapeHtml(c.CategoryID)}">${escapeHtml(c.CategoryName)}</option>`).join('');
+    catFilterEl.value = prevVal;
+  }
+
+  renderAdminMenuTable();
+
+  $('tablesTableBody').innerHTML = (state.tables || []).map(t => `
+    <tr>
+      <td><strong>${escapeHtml(t.TableNumber)}</strong></td>
+      <td>${escapeHtml(t.Capacity)} seats</td>
+      <td><span class="badge bg-${t.Status === 'Available' ? 'success' : 'secondary'}">${escapeHtml(t.Status)}</span></td>
+      <td class="text-end text-nowrap">
+        <button class="btn btn-sm btn-outline-primary fw-bold me-1" onclick="editTable('${escapeHtml(t.TableID)}')">
+          <i class="fa-solid fa-pen-to-square me-1"></i>Edit
+        </button>
+        <button class="btn btn-sm btn-outline-danger fw-bold" onclick="deleteTable('${escapeHtml(t.TableID)}')">
+          <i class="fa-solid fa-trash me-1"></i>Delete
+        </button>
+      </td>
+    </tr>`).join('');
+
+  $('categoriesList').innerHTML = (state.categories || []).map(c => `
+    <span class="badge bg-secondary me-2 mb-2 p-2 d-inline-flex align-items-center gap-2">
+      <span>${escapeHtml(c.CategoryName)}</span>
+      <button type="button" class="btn-close btn-close-white" style="font-size:0.65rem;" title="Delete Category" onclick="deleteCategory('${escapeHtml(c.CategoryID)}', '${escapeHtml(c.CategoryName)}')"></button>
+    </span>`).join('');
+
+  const brMap = {};
+  (state.branches || []).forEach(b => { brMap[b.BranchID] = b.BranchName; });
+  $('usersTableBody').innerHTML = (state.users || []).map(u => {
+    const isSelf = state.user && String(state.user.userId) === String(u.UserID);
+    const isTargetAdmin = u.Role === 'Admin';
+    const isPrimaryAdmin = String(u.Username).toLowerCase() === 'admin';
+    const canModifyTarget = isGlobalAdmin() || !isTargetAdmin;
+
+    const editBtn = canModifyTarget
+      ? `<button class="btn btn-sm btn-outline-primary fw-bold me-1" onclick="editUser('${escapeHtml(u.UserID)}')"><i class="fa-solid fa-pen-to-square me-1"></i>Edit</button>`
+      : `<button class="btn btn-sm btn-outline-secondary fw-bold me-1" disabled title="Only Admin can edit Admin accounts"><i class="fa-solid fa-lock me-1"></i>Admin</button>`;
+
+    const deleteDisabled = !canModifyTarget || isSelf || isPrimaryAdmin;
+    const deleteTitle = !canModifyTarget
+      ? 'Only Admin can delete Admin accounts'
+      : (isSelf ? 'Cannot delete your active session user' : (isPrimaryAdmin ? 'Primary admin account is protected' : 'Delete user'));
+    const deleteBtn = `<button class="btn btn-sm btn-outline-danger fw-bold" ${deleteDisabled ? `disabled title="${deleteTitle}"` : `onclick="deleteUserById('${escapeHtml(u.UserID)}', '${escapeHtml(u.FullName)}')"`}><i class="fa-solid fa-trash me-1"></i>Delete</button>`;
+
+    return `
+    <tr>
+      <td><strong>${escapeHtml(u.FullName)}</strong></td>
+      <td>${escapeHtml(u.Username)}</td>
+      <td class="small">${u.Email ? `<i class="fa-solid fa-envelope text-primary me-1"></i>${escapeHtml(u.Email)}` : '<span class="text-muted">Not set</span>'}</td>
+      <td><span class="badge bg-${isTargetAdmin ? 'danger' : 'dark'}">${escapeHtml(u.Role)}</span></td>
+      <td><span class="badge bg-light text-dark border">${escapeHtml(u.BranchID ? (brMap[u.BranchID] || u.BranchID) : 'All Branches')}</span></td>
+      <td>${u.Active ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>'}</td>
+      <td class="small text-muted">${u.LastLogin ? new Date(u.LastLogin).toLocaleString() : '—'}</td>
+      <td class="text-end text-nowrap">
+        ${editBtn}
+        ${deleteBtn}
+      </td>
+    </tr>`;
+  }).join('');
 }
-function resetMenuForm() {
-  $('cfgMenuId').value = '';
-  $('cfgMenuName').value = '';
-  $('cfgMenuPrice').value = '';
-  $('cfgMenuStation').value = 'Kitchen';
-  $('cfgMenuAvailable').value = 'true';
-  if ($('cfgMenuImageFile')) $('cfgMenuImageFile').value = '';
-  $('cfgMenuImageUrl').value = '';
-  $('cfgMenuImagePreview').classList.add('d-none');
-  $('cfgMenuNoImgText').classList.remove('d-none');
-  $('cfgMenuFormTitle').textContent = 'Add / Edit Menu Item';
+
+function renderAdminMenuTable() {
+  const tbody = $('menuTableBody');
+  if (!tbody) return;
+  const search = ($('adminMenuSearch')?.value || '').trim().toLowerCase();
+  const catFilter = $('adminMenuCatFilter')?.value || 'ALL';
+
+  const filtered = (state.menu || []).filter(m => {
+    const matchesCat = catFilter === 'ALL' || String(m.CategoryID) === String(catFilter);
+    const matchesSearch = !search ||
+      String(m.ItemName || '').toLowerCase().includes(search) ||
+      String(m.Category || '').toLowerCase().includes(search) ||
+      String(m.Station || '').toLowerCase().includes(search);
+    return matchesCat && matchesSearch;
+  });
+
+  if ($('adminMenuCountBadge')) {
+    $('adminMenuCountBadge').textContent = `${filtered.length} of ${(state.menu || []).length} items`;
+  }
+
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">No matching menu items found.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(m => {
+    const imgSrc = m.ImageURL && String(m.ImageURL).trim() ? escapeHtml(m.ImageURL.trim()) : FOOD_PLACEHOLDER;
+    const isAvail = m.Available === true || String(m.Available).toLowerCase() === 'true';
+    const price = resolveMenuPrice(m);
+    return `<tr>
+      <td><img src="${imgSrc}" class="img-preview-thumb" onerror="this.onerror=null;this.src='${FOOD_PLACEHOLDER}'"></td>
+      <td><strong>${escapeHtml(m.ItemName)}</strong></td>
+      <td>${escapeHtml(m.Category || '—')}</td>
+      <td><strong class="text-primary">${curr()}${price.toFixed(2)}</strong></td>
+      <td><span class="badge bg-light text-dark border">${escapeHtml(m.Station || 'Kitchen')}</span></td>
+      <td><span class="badge bg-${isAvail ? 'success' : 'secondary'}">${isAvail ? 'Available' : 'Unavailable'}</span></td>
+      <td class="text-end text-nowrap">
+        <button type="button" class="btn btn-sm btn-outline-primary fw-bold me-1" onclick="editMenuItem('${escapeHtml(m.MenuItemID)}')">
+          <i class="fa-solid fa-pen-to-square me-1"></i>Edit
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-danger fw-bold" onclick="deleteMenuItemById('${escapeHtml(m.MenuItemID)}', '${escapeHtml(m.ItemName)}')">
+          <i class="fa-solid fa-trash me-1"></i>Delete
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
 }
-function editMenuItemById(id) {
-  const m = state.menuById[id] || (state.menu || []).find(x => (x.MenuItemID || x.ItemID) === id);
+
+function editTable(tableId) {
+  const t = (state.tables || []).find(x => x.TableID === tableId);
+  if (!t) return toast('Table not found.', 'warning');
+  $('cfgTableId').value = t.TableID;
+  $('cfgTableName').value = t.TableNumber;
+  $('cfgTableCapacity').value = t.Capacity || 4;
+  $('cfgTableFormTitle').textContent = `Edit Table (${t.TableNumber})`;
+  $('cfgTableSubmitBtn').innerHTML = '<i class="fa-solid fa-floppy-disk me-1"></i>Update Table';
+  $('cfgTableName').focus();
+}
+
+function resetTableForm() {
+  $('cfgTableId').value = '';
+  $('cfgTableName').value = '';
+  $('cfgTableCapacity').value = '4';
+  $('cfgTableFormTitle').textContent = 'Add / Edit Table';
+  $('cfgTableSubmitBtn').innerHTML = '<i class="fa-solid fa-floppy-disk me-1"></i>Save Table';
+}
+
+function onToggleDisableKds(cb) {
+  if (!cb.checked && !confirm('Enabling Kitchen Display System will send confirmed orders to the Kitchen screen.\n\nProceed?')) cb.checked = true;
+}
+
+async function saveSettings(e) {
+  e.preventDefault();
+  const cfg = {
+    RESTAURANT_NAME: $('cfgRestaurantName').value.trim(), TAX_RATE: $('cfgTaxRate').value,
+    ENABLE_TAX: $('cfgEnableTax').checked ? 'true' : 'false', SERVICE_CHARGE_PERCENT: $('cfgServiceCharge').value,
+    ENABLE_SERVICE_CHARGE: $('cfgEnableServiceCharge').checked ? 'true' : 'false',
+    CURRENCY_SYMBOL: $('cfgCurrency').value.trim(), TIMEZONE: $('cfgTimezone').value.trim(),
+    DISABLE_KDS: $('cfgDisableKds').checked ? 'true' : 'false',
+    RECEIPT_FOOTER: $('cfgReceiptFooter').value.trim(),
+    SENIOR_PWD_DISCOUNT_PERCENT: $('cfgSeniorPwdDiscount').value,
+    VAT_INCLUSIVE: $('cfgVatInclusive').checked ? 'true' : 'false'
+  };
+  try { showLoading('Saving settings…'); await callServer('saveSystemSettings', state.token, cfg); showDone('Settings saved!', () => loadBootstrap()); }
+  catch (err) { hideLoading(); toast(err.message, 'danger'); }
+}
+
+function previewMenuImage(input) {
+  const file = input.files && input.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function (ev) {
+    const img = new Image();
+    img.onload = function () {
+      const canvas = document.createElement('canvas'); let w = img.width, h = img.height, max = 300;
+      if (w > max || h > max) { if (w > h) { h = Math.round(h * max / w); w = max; } else { w = Math.round(w * max / h); h = max; } }
+      canvas.width = w; canvas.height = h; canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const b64 = canvas.toDataURL('image/jpeg', 0.72);
+      $('cfgMenuImageUrl').value = b64; $('cfgMenuImagePreview').src = b64;
+      $('cfgMenuImagePreview').classList.remove('d-none'); $('cfgMenuNoImgText').classList.add('d-none');
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function editMenuItem(id) {
+  const m = state.menuById[id];
   if (!m) return toast('Menu item not found.', 'warning');
-  const itemId = m.MenuItemID || m.ItemID;
-  const itemName = m.ItemName || m.Name || 'Unnamed Item';
-  const itemPrice = resolveMenuPrice(m);
-
-  $('cfgMenuId').value = itemId;
-  $('cfgMenuName').value = itemName;
-  if (m.CategoryID) $('cfgMenuCategory').value = m.CategoryID;
-  $('cfgMenuPrice').value = itemPrice.toFixed(2);
+  $('cfgMenuId').value = m.MenuItemID;
+  $('cfgMenuName').value = m.ItemName;
+  $('cfgMenuCategory').value = m.CategoryID;
+  $('cfgMenuPrice').value = resolveMenuPrice(m).toFixed(2);
   $('cfgMenuStation').value = m.Station || 'Kitchen';
-  $('cfgMenuAvailable').value = (m.Available !== false && m.Available !== 'false') ? 'true' : 'false';
-  if ($('cfgMenuImageFile')) $('cfgMenuImageFile').value = '';
+  const isAvail = m.Available === true || String(m.Available).toLowerCase() === 'true';
+  $('cfgMenuAvailable').value = isAvail ? 'true' : 'false';
   $('cfgMenuImageUrl').value = m.ImageURL || '';
-
   if (m.ImageURL) {
     $('cfgMenuImagePreview').src = m.ImageURL;
     $('cfgMenuImagePreview').classList.remove('d-none');
@@ -2668,806 +3611,760 @@ function editMenuItemById(id) {
     $('cfgMenuImagePreview').classList.add('d-none');
     $('cfgMenuNoImgText').classList.remove('d-none');
   }
-  $('cfgMenuFormTitle').textContent = `Edit Menu Item (${itemName})`;
+  $('cfgMenuFormTitle').textContent = `Edit Menu Item (${m.ItemName})`;
   $('cfgMenuName').focus();
 }
+
+function resetMenuForm() {
+  $('cfgMenuId').value = ''; $('cfgMenuName').value = ''; $('cfgMenuPrice').value = ''; $('cfgMenuAvailable').value = 'true';
+  $('cfgMenuImageUrl').value = ''; $('cfgMenuImageFile').value = ''; $('cfgMenuImagePreview').classList.add('d-none'); $('cfgMenuNoImgText').classList.remove('d-none');
+  $('cfgMenuFormTitle').textContent = 'Add / Edit Menu Item';
+}
+
 async function saveMenuItem(e) {
   e.preventDefault();
-  const isEdit = Boolean($('cfgMenuId').value);
+  const item = {
+    MenuItemID: $('cfgMenuId').value, ItemName: $('cfgMenuName').value, CategoryID: $('cfgMenuCategory').value,
+    Price: $('cfgMenuPrice').value, Station: $('cfgMenuStation').value, Available: $('cfgMenuAvailable').value === 'true', ImageURL: $('cfgMenuImageUrl').value
+  };
   try {
-    showLoading(isEdit ? 'Updating menu item…' : 'Adding menu item…');
-    await callServer('saveMenuItem', state.token, {
-      MenuItemID: $('cfgMenuId').value,
-      ItemName: $('cfgMenuName').value,
-      CategoryID: $('cfgMenuCategory').value,
-      Price: $('cfgMenuPrice').value,
-      Station: $('cfgMenuStation').value,
-      Available: $('cfgMenuAvailable').value === 'true',
-      ImageURL: $('cfgMenuImageUrl').value
-    });
-    showDone(isEdit ? 'Menu item updated!' : 'Menu item added!', async () => {
+    showLoading('Saving menu item…');
+    await callServer('saveMenuItem', state.token, item);
+    showDone('Menu item saved!', async () => {
       resetMenuForm();
       await loadBootstrap();
     });
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
-async function deleteMenuItemById(id, itemName) {
-  if (!confirm(`Delete menu item "${itemName}"? This will remove it from all branches.`)) return;
+
+async function deleteMenuItemById(itemId, itemName) {
+  if (!confirm(`Delete menu item "${itemName}" from all branches?`)) return;
   try {
     showLoading(`Deleting ${itemName}…`);
-    const res = await callServer('deleteMenuItem', state.token, id);
+    const res = await callServer('deleteMenuItem', state.token, itemId);
+    if ($('cfgMenuId').value === itemId) resetMenuForm();
     showDone(res.message || 'Menu item deleted!', async () => {
-      if ($('cfgMenuId').value === id) resetMenuForm();
       await loadBootstrap();
     });
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
-function csvEscapeField(val) {
-  const s = String(val === undefined || val === null ? '' : val);
-  if (/[",\r\n]/.test(s)) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
-
+/* ============================================================
+   CSV PARSER & MENU / CATEGORY CSV IMPORT & EXPORT
+   ============================================================ */
 function parseCsvRows(text) {
   const rows = [];
-  let row = [];
-  let cur = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    const next = text[i + 1];
-
+  let row = [], cell = '', inQuotes = false;
+  const clean = String(text || '').replace(/^\uFEFF/, '');
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean[i], next = clean[i + 1];
     if (inQuotes) {
-      if (ch === '"' && next === '"') {
-        cur += '"';
-        i++;
-      } else if (ch === '"') {
-        inQuotes = false;
-      } else {
-        cur += ch;
-      }
+      if (ch === '"' && next === '"') { cell += '"'; i++; }
+      else if (ch === '"') { inQuotes = false; }
+      else { cell += ch; }
     } else {
-      if (ch === '"') {
-        inQuotes = true;
-      } else if (ch === ',') {
-        row.push(cur);
-        cur = '';
-      } else if (ch === '\r' && next === '\n') {
-        row.push(cur);
-        rows.push(row);
-        row = [];
-        cur = '';
-        i++;
-      } else if (ch === '\n' || ch === '\r') {
-        row.push(cur);
-        rows.push(row);
-        row = [];
-        cur = '';
-      } else {
-        cur += ch;
-      }
+      if (ch === '"') { inQuotes = true; }
+      else if (ch === ',') { row.push(cell.trim()); cell = ''; }
+      else if (ch === '\r' && next === '\n') { row.push(cell.trim()); rows.push(row); row = []; cell = ''; i++; }
+      else if (ch === '\n' || ch === '\r') { row.push(cell.trim()); rows.push(row); row = []; cell = ''; }
+      else { cell += ch; }
     }
   }
-  if (cur.length > 0 || row.length > 0) {
-    row.push(cur);
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell.trim());
     rows.push(row);
   }
-  return rows.filter(r => r.some(cell => String(cell).trim() !== ''));
+  return rows.filter(r => r.some(v => v !== ''));
+}
+
+function downloadCsvFile(filename, headers, rows) {
+  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const csv = [headers.map(esc).join(',')].concat(rows.map(r => r.map(esc).join(','))).join('\r\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
 }
 
 function exportMenuCsv() {
-  const catById = {};
-  (state.categories || []).forEach(c => { catById[c.CategoryID] = c.CategoryName; });
-  const header = ['ItemID', 'ItemName', 'Category', 'Price', 'Station', 'Available'];
-  const rows = (state.menu || []).map(m => {
-    const id = m.MenuItemID || m.ItemID || '';
-    const name = m.ItemName || m.Name || '';
-    const cat = catById[m.CategoryID] || m.Category || 'General';
-    const price = resolveMenuPrice(m).toFixed(2);
-    const station = m.Station || 'Kitchen';
-    const avail = (m.Available !== false && m.Available !== 'false') ? 'true' : 'false';
-    return [id, name, cat, price, station, avail].map(csvEscapeField).join(',');
-  });
-
-  const csvContent = '\uFEFF' + [header.join(','), ...rows].join('\r\n');
-  const bId = state.activeBranchId || 'branch-main';
-  const link = document.createElement('a');
-  link.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvContent);
-  link.download = `menu_items_${bId}_${todayStr()}.csv`;
-  link.click();
-  toast(`Exported ${rows.length} menu item(s) to CSV.`, 'success');
+  const activeBr = (state.branches || []).find(b => b.BranchID === state.activeBranchId);
+  const brCode = activeBr ? activeBr.BranchCode : 'MAIN';
+  const headers = ['ItemID', 'ItemName', 'Category', 'Price', 'Station', 'Available', 'ImageURL'];
+  const rows = (state.menu || []).map(m => [
+    m.MenuItemID || '',
+    m.ItemName || '',
+    m.Category || '',
+    resolveMenuPrice(m).toFixed(2),
+    m.Station || 'Kitchen',
+    (m.Available === true || String(m.Available).toLowerCase() === 'true') ? 'true' : 'false',
+    (m.ImageURL && !String(m.ImageURL).startsWith('data:')) ? m.ImageURL : ''
+  ]);
+  downloadCsvFile(`menu_items_${brCode}_${todayStr()}.csv`, headers, rows);
+  toast(`Downloaded ${rows.length} menu item(s) to CSV.`, 'success');
 }
 
-async function importMenuCsv(input) {
-  const file = input?.files?.[0];
+async function importMenuCsv(inputEl) {
+  const file = inputEl?.files?.[0];
   if (!file) return;
   try {
-    const rawText = await file.text();
-    const cleaned = rawText.replace(/^\uFEFF/, '');
-    const rows = parseCsvRows(cleaned);
+    const text = await file.text();
+    const rows = parseCsvRows(text);
     if (rows.length < 2) {
-      input.value = '';
-      return toast('CSV file is empty or missing data rows.', 'warning');
+      inputEl.value = '';
+      return toast('CSV file must include a header row and at least one menu item row.', 'warning');
     }
 
-    const headers = rows[0].map(h => String(h || '').trim().toLowerCase());
-    const idxId = headers.findIndex(h => ['itemid', 'menuitemid', 'id'].includes(h));
-    const idxName = headers.findIndex(h => ['itemname', 'name', 'item'].includes(h));
-    const idxCat = headers.findIndex(h => ['category', 'categoryname'].includes(h));
-    const idxPrice = headers.findIndex(h => ['price', 'amount', 'unitprice'].includes(h));
-    const idxStation = headers.findIndex(h => ['station', 'kitchenstation'].includes(h));
-    const idxAvail = headers.findIndex(h => ['available', 'status', 'active'].includes(h));
+    const headerMap = {};
+    rows[0].forEach((h, idx) => { headerMap[h.toLowerCase().replace(/[^a-z0-9]/g, '')] = idx; });
 
-    if (idxName === -1 || idxPrice === -1) {
-      input.value = '';
-      return toast('CSV must include "ItemName" (or "Name") and "Price" columns.', 'danger');
+    const nameIdx = headerMap.itemname ?? headerMap.name;
+    const priceIdx = headerMap.price;
+    if (nameIdx === undefined || priceIdx === undefined) {
+      inputEl.value = '';
+      return toast('CSV header must contain "ItemName" (or "Name") and "Price" columns.', 'danger');
     }
 
-    const validStations = ['Kitchen', 'Grill', 'Fryer', 'Drinks', 'Desserts'];
+    const idIdx = headerMap.itemid ?? headerMap.menuitemid ?? headerMap.id;
+    const catIdx = headerMap.category ?? headerMap.categoryname;
+    const stationIdx = headerMap.station;
+    const availIdx = headerMap.available ?? headerMap.status;
+    const imgIdx = headerMap.imageurl ?? headerMap.image;
+
     const dataRows = rows.slice(1);
-    if (!confirm(`Import ${dataRows.length} menu row(s) from "${file.name}"? Existing items with matching ID or Name will be updated.`)) {
-      input.value = '';
+    if (!confirm(`Import ${dataRows.length} menu row(s) from "${file.name}" into the current branch? Matching item IDs or names will be updated.`)) {
+      inputEl.value = '';
       return;
     }
 
     showLoading(`Importing ${dataRows.length} menu item(s)…`);
 
-    const existingById = {};
-    const existingByName = {};
-    (state.menu || []).forEach(m => {
-      const mid = m.MenuItemID || m.ItemID;
-      const mname = String(m.ItemName || m.Name || '').trim().toLowerCase();
-      if (mid) existingById[mid] = m;
-      if (mname) existingByName[mname] = m;
-    });
-
     const catByName = {};
-    (state.categories || []).forEach(c => {
-      catByName[String(c.CategoryName || '').trim().toLowerCase()] = c.CategoryID;
-    });
+    (state.categories || []).forEach(c => { catByName[String(c.CategoryName || '').trim().toLowerCase()] = c; });
 
-    let importedCount = 0;
-    let skippedCount = 0;
+    const menuByName = {};
+    (state.menu || []).forEach(m => { menuByName[String(m.ItemName || '').trim().toLowerCase()] = m; });
 
-    for (const r of dataRows) {
-      const rawName = String(r[idxName] || '').trim();
-      const rawPrice = parseFloat(String(r[idxPrice] || '').replace(/[^0-9.-]/g, ''));
-      if (!rawName || Number.isNaN(rawPrice) || rawPrice < 0) {
-        skippedCount++;
-        continue;
-      }
+    let imported = 0;
+    for (let rIdx = 0; rIdx < dataRows.length; rIdx++) {
+      const cols = dataRows[rIdx];
+      const rawName = (cols[nameIdx] || '').trim();
+      if (!rawName) continue;
 
-      const rawId = idxId !== -1 ? String(r[idxId] || '').trim() : '';
-      const matched = (rawId && existingById[rawId]) || existingByName[rawName.toLowerCase()] || null;
-      const targetId = matched ? (matched.MenuItemID || matched.ItemID) : '';
+      const rawPrice = parseFloat(String(cols[priceIdx] || '0').replace(/[^0-9.-]/g, ''));
+      const price = Number.isFinite(rawPrice) && rawPrice >= 0 ? rawPrice : 0;
+      const rawCat = catIdx !== undefined ? (cols[catIdx] || '').trim() : '';
+      const rawStation = stationIdx !== undefined && cols[stationIdx] ? cols[stationIdx].trim() : 'Kitchen';
+      const rawAvail = availIdx !== undefined ? String(cols[availIdx] || 'true').trim().toLowerCase() : 'true';
+      const isAvail = !['false', '0', 'no', 'unavailable', 'inactive'].includes(rawAvail);
+      const rawImg = imgIdx !== undefined ? (cols[imgIdx] || '').trim() : '';
 
-      const rawCat = idxCat !== -1 ? String(r[idxCat] || '').trim() : '';
-      let catId = '';
-      if (rawCat) {
-        catId = catByName[rawCat.toLowerCase()] || '';
-        if (!catId) {
-          const createdCat = await callServer('saveCategory', state.token, { CategoryName: rawCat, Description: '' });
-          catId = createdCat.CategoryID;
-          catByName[rawCat.toLowerCase()] = catId;
-          state.categories.push({ CategoryID: catId, CategoryName: rawCat, Description: '', SortOrder: state.categories.length + 1 });
+      let catObj = rawCat ? catByName[rawCat.toLowerCase()] : null;
+      if (!catObj && rawCat) {
+        const createdCat = await callServer('saveCategory', state.token, { CategoryName: rawCat, Description: '' });
+        catObj = { CategoryID: createdCat.CategoryID, CategoryName: rawCat };
+        catByName[rawCat.toLowerCase()] = catObj;
+        state.categories.push(catObj);
+      } else if (!catObj) {
+        catObj = (state.categories || [])[0];
+        if (!catObj) {
+          const createdCat = await callServer('saveCategory', state.token, { CategoryName: 'General', Description: '' });
+          catObj = { CategoryID: createdCat.CategoryID, CategoryName: 'General' };
+          catByName['general'] = catObj;
+          state.categories.push(catObj);
         }
-      } else if (matched?.CategoryID) {
-        catId = matched.CategoryID;
-      } else if (state.categories[0]?.CategoryID) {
-        catId = state.categories[0].CategoryID;
       }
 
-      const rawStation = idxStation !== -1 ? String(r[idxStation] || '').trim() : '';
-      const stationMatch = validStations.find(st => st.toLowerCase() === rawStation.toLowerCase()) || matched?.Station || 'Kitchen';
-
-      let available = true;
-      if (idxAvail !== -1 && r[idxAvail] !== undefined && String(r[idxAvail]).trim() !== '') {
-        const avStr = String(r[idxAvail]).trim().toLowerCase();
-        available = !['false', '0', 'no', 'unavailable', 'inactive'].includes(avStr);
-      } else if (matched) {
-        available = matched.Available !== false && matched.Available !== 'false';
-      }
+      const csvId = idIdx !== undefined ? (cols[idIdx] || '').trim() : '';
+      const existingById = csvId ? state.menuById[csvId] : null;
+      const existingByName = menuByName[rawName.toLowerCase()];
+      const targetId = existingById ? existingById.MenuItemID : (existingByName ? existingByName.MenuItemID : '');
+      const preservedImg = rawImg || (existingById?.ImageURL || existingByName?.ImageURL || '');
 
       await callServer('saveMenuItem', state.token, {
         MenuItemID: targetId,
         ItemName: rawName,
-        CategoryID: catId,
-        Price: rawPrice,
-        Station: stationMatch,
-        Available: available,
-        ImageURL: matched?.ImageURL || ''
+        CategoryID: catObj.CategoryID,
+        Price: price.toFixed(2),
+        Station: rawStation || 'Kitchen',
+        Available: isAvail,
+        ImageURL: preservedImg
       });
-      importedCount++;
+      imported++;
     }
 
-    input.value = '';
-    showDone(`Imported ${importedCount} item(s)${skippedCount ? ` (${skippedCount} skipped)` : ''}!`, async () => {
-      await loadBootstrap();
-    });
-  } catch (err) {
-    input.value = '';
-    hideLoading();
-    toast('CSV import failed: ' + err.message, 'danger');
-  }
-}
-
-function renderAdminMenuTable() {
-  const tbody = $('menuTableBody');
-  if (!tbody) return;
-  const catById = {};
-  (state.categories || []).forEach(c => { catById[c.CategoryID] = c; });
-
-  const searchTerm = ($('adminMenuSearch')?.value || '').trim().toLowerCase();
-  const catFilter = $('adminMenuCatFilter')?.value || 'ALL';
-
-  const filtered = (state.menu || []).filter(m => {
-    const name = String(m.ItemName || m.Name || '').toLowerCase();
-    const station = String(m.Station || '').toLowerCase();
-    const catName = String(catById[m.CategoryID]?.CategoryName || m.Category || '').toLowerCase();
-    const matchesSearch = !searchTerm || name.includes(searchTerm) || station.includes(searchTerm) || catName.includes(searchTerm);
-    const matchesCat = catFilter === 'ALL' || String(m.CategoryID) === String(catFilter);
-    return matchesSearch && matchesCat;
-  });
-
-  if ($('adminMenuCountBadge')) {
-    $('adminMenuCountBadge').textContent = `${filtered.length} of ${(state.menu || []).length} items`;
-  }
-
-  setHtml(tbody, filtered.length ? filtered.map(m => {
-    const id = m.MenuItemID || m.ItemID;
-    const name = m.ItemName || m.Name || 'Unnamed Item';
-    const price = resolveMenuPrice(m);
-    const isAvail = m.Available !== false && m.Available !== 'false';
-    return `<tr>
-      <td>${m.ImageURL ? `<img src="${escapeHtml(m.ImageURL)}" class="img-preview-thumb">` : `<div class="img-preview-thumb d-flex align-items-center justify-content-center text-muted"><i class="fa-solid fa-utensils"></i></div>`}</td>
-      <td><strong>${escapeHtml(name)}</strong></td>
-      <td>${escapeHtml(catById[m.CategoryID]?.CategoryName || m.Category || '')}</td>
-      <td><strong>${curr()}${price.toFixed(2)}</strong></td>
-      <td><span class="badge bg-dark">${escapeHtml(m.Station || 'Kitchen')}</span></td>
-      <td>${isAvail ? '<span class="badge bg-success">Available</span>' : '<span class="badge bg-danger">Unavailable</span>'}</td>
-      <td class="text-end text-nowrap">
-        <button class="btn btn-sm btn-outline-primary fw-bold me-1" onclick="editMenuItemById('${escapeHtml(id)}')"><i class="fa-solid fa-pen-to-square me-1"></i>Edit</button>
-        <button class="btn btn-sm btn-outline-danger fw-bold" onclick="deleteMenuItemById('${escapeHtml(id)}', '${escapeHtml(name)}')"><i class="fa-solid fa-trash me-1"></i>Delete</button>
-      </td>
-    </tr>`;
-  }).join('') : `<tr><td colspan="7" class="text-center text-muted py-3">No menu items match your filter.</td></tr>`);
-}
-
-async function deleteCategoryById(catId, catName) {
-  if (!confirm(`Delete category "${catName}"?`)) return;
-  try {
-    showLoading(`Deleting category ${catName}…`);
-    const res = await callServer('deleteCategory', state.token, catId);
-    showDone(res.message || 'Category deleted!', async () => {
-      if ($('adminMenuCatFilter')?.value === catId) $('adminMenuCatFilter').value = 'ALL';
+    inputEl.value = '';
+    showDone(`Imported ${imported} menu item(s)!`, async () => {
       await loadBootstrap();
     });
   } catch (err) {
     hideLoading();
-    toast(err.message, 'danger');
+    if (inputEl) inputEl.value = '';
+    toast(err.message || 'Failed to import menu CSV.', 'danger');
   }
 }
 
-function resetTableForm() { $('cfgTableId').value = ''; $('cfgTableName').value = ''; $('cfgTableCapacity').value = 4; }
-function editTableById(tableId) {
-  const t = (state.tables || []).find(x => x.TableID === tableId);
-  if (!t) return;
-  $('cfgTableId').value = t.TableID; $('cfgTableName').value = t.TableNumber; $('cfgTableCapacity').value = t.Capacity || 4;
+function exportCategoryCsv() {
+  const headers = ['CategoryID', 'CategoryName', 'Description', 'SortOrder'];
+  const rows = (state.categories || []).map((c, idx) => [
+    c.CategoryID || '',
+    c.CategoryName || '',
+    c.Description || '',
+    c.SortOrder ?? (idx + 1)
+  ]);
+  downloadCsvFile(`menu_categories_${todayStr()}.csv`, headers, rows);
+  toast(`Downloaded ${rows.length} category row(s) to CSV.`, 'success');
 }
-async function deleteTableById(tableId, tableNumber) {
-  if (!confirm(`Delete "${tableNumber}"?`)) return;
+
+async function importCategoryCsv(inputEl) {
+  const file = inputEl?.files?.[0];
+  if (!file) return;
   try {
-    showLoading(`Deleting ${tableNumber}…`);
-    const res = await callServer('deleteTable', state.token, tableId);
-    showDone(res.message, () => { loadBootstrap(); poll(true); });
-  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
-}
+    const text = await file.text();
+    const rows = parseCsvRows(text);
+    if (rows.length < 2) {
+      inputEl.value = '';
+      return toast('CSV file must include a header row and at least one category row.', 'warning');
+    }
 
-function syncUserRoleDropdown() {
-  const roleSel = $('cfgUserRole');
-  if (!roleSel) return;
-  const isManager = state.user?.role === 'Manager';
-  const roles = isManager
-    ? ['Manager', 'Waiter', 'Counter', 'Kitchen']
-    : ['Admin', 'Manager', 'Waiter', 'Counter', 'Kitchen'];
-  const currentVal = roleSel.value;
-  roleSel.innerHTML = roles.map(r => `<option value="${r}">${r}</option>`).join('');
-  if (roles.includes(currentVal)) roleSel.value = currentVal;
-  else roleSel.value = 'Waiter';
-}
+    const headerMap = {};
+    rows[0].forEach((h, idx) => { headerMap[h.toLowerCase().replace(/[^a-z0-9]/g, '')] = idx; });
 
-function populateAdminForms() {
-  if (!state.user || !['Admin', 'Manager'].includes(state.user.role)) return;
-  $('cfgRestaurantName').value = state.settings.RESTAURANT_NAME || '';
-  $('cfgTaxRate').value = state.settings.TAX_RATE_PERCENT ?? 12;
-  $('cfgServiceCharge').value = state.settings.SERVICE_CHARGE_PERCENT ?? 5;
-  $('cfgSeniorPwdDiscount').value = state.settings.SENIOR_PWD_DISCOUNT_PERCENT ?? 20;
-  $('cfgEnableTax').checked = state.settings.ENABLE_TAX !== 'false';
-  $('cfgVatInclusive').checked = state.settings.VAT_INCLUSIVE !== 'false';
-  $('cfgEnableServiceCharge').checked = state.settings.ENABLE_SERVICE_CHARGE !== 'false';
-  $('cfgDisableKds').checked = isKdsDisabled();
-  $('cfgCurrency').value = state.settings.CURRENCY_SYMBOL || '₱';
-  $('cfgTimezone').value = state.settings.TIMEZONE || 'Asia/Manila';
-  $('cfgReceiptFooter').value = state.settings.RECEIPT_FOOTER || '';
+    const nameIdx = headerMap.categoryname ?? headerMap.name ?? headerMap.category;
+    if (nameIdx === undefined) {
+      inputEl.value = '';
+      return toast('CSV header must contain a "CategoryName" (or "Name") column.', 'danger');
+    }
 
-  const catList = state.categories || [];
-  $('cfgMenuCategory').innerHTML = catList.map(c => `<option value="${escapeHtml(c.CategoryID)}">${escapeHtml(c.CategoryName)}</option>`).join('');
+    const idIdx = headerMap.categoryid ?? headerMap.id;
+    const descIdx = headerMap.description ?? headerMap.desc;
+    const sortIdx = headerMap.sortorder ?? headerMap.sort ?? headerMap.order;
 
-  const filterSel = $('adminMenuCatFilter');
-  if (filterSel) {
-    const prevFilter = filterSel.value || 'ALL';
-    filterSel.innerHTML = `<option value="ALL">All Categories</option>` +
-      catList.map(c => `<option value="${escapeHtml(c.CategoryID)}">${escapeHtml(c.CategoryName)}</option>`).join('');
-    filterSel.value = catList.some(c => String(c.CategoryID) === prevFilter) ? prevFilter : 'ALL';
-  }
+    const dataRows = rows.slice(1);
+    if (!confirm(`Import ${dataRows.length} category row(s) from "${file.name}"? Matching categories will be updated.`)) {
+      inputEl.value = '';
+      return;
+    }
 
-  renderAdminMenuTable();
+    showLoading(`Importing ${dataRows.length} category row(s)…`);
 
-  setHtml($('tablesTableBody'), (state.tables || []).map(t => `<tr>
-    <td><strong>${escapeHtml(t.TableNumber)}</strong></td>
-    <td>${escapeHtml(t.Capacity)} seats</td>
-    <td><span class="badge bg-secondary">${escapeHtml(t.Status)}</span></td>
-    <td class="text-end">
-      <button class="btn btn-sm btn-outline-primary fw-bold me-1" onclick="editTableById('${escapeHtml(t.TableID)}')">Edit</button>
-      <button class="btn btn-sm btn-outline-danger fw-bold" onclick="deleteTableById('${escapeHtml(t.TableID)}', '${escapeHtml(t.TableNumber)}')">Delete</button>
-    </td>
-  </tr>`).join(''));
-
-  setHtml($('categoriesList'), catList.length ? catList.map(c => {
-    const itemCount = (state.menu || []).filter(m => String(m.CategoryID) === String(c.CategoryID)).length;
-    return `<div class="d-flex justify-content-between align-items-center border-bottom py-2">
-      <div>
-        <strong>${escapeHtml(c.CategoryName)}</strong>
-        <small class="text-muted ms-1">${escapeHtml(c.Description || '')}</small>
-      </div>
-      <div class="d-flex align-items-center gap-2">
-        <span class="badge bg-light text-dark border">${itemCount} item${itemCount === 1 ? '' : 's'}</span>
-        <span class="badge bg-info">Sort ${escapeHtml(c.SortOrder)}</span>
-        <button class="btn btn-sm btn-outline-danger fw-bold" onclick="deleteCategoryById('${escapeHtml(c.CategoryID)}', '${escapeHtml(c.CategoryName)}')"><i class="fa-solid fa-trash me-1"></i>Delete</button>
-      </div>
-    </div>`;
-  }).join('') : '<div class="text-muted small py-2">No categories configured yet.</div>');
-
-  syncUserRoleDropdown();
-
-  const isManager = state.user.role === 'Manager';
-  const branchMap = {}; (state.branches || []).forEach(b => { branchMap[b.BranchID] = b.BranchName; });
-  setHtml($('usersTableBody'), (state.users || []).map(u => {
-    const isSelf = state.user && String(state.user.userId) === String(u.UserID);
-    const isPrimaryAdmin = String(u.Username || '').toLowerCase() === 'admin';
-    const isTargetAdmin = u.Role === 'Admin';
-    const lockedForManager = isManager && isTargetAdmin;
-
-    const editBtn = lockedForManager
-      ? `<button class="btn btn-sm btn-outline-secondary fw-bold me-1" disabled title="Managers cannot edit Admin accounts"><i class="fa-solid fa-lock me-1"></i>Admin</button>`
-      : `<button class="btn btn-sm btn-outline-primary fw-bold me-1" onclick="editUserRow('${escapeHtml(u.UserID)}')"><i class="fa-solid fa-pen-to-square me-1"></i>Edit</button>`;
-
-    const delBtn = (isSelf || isPrimaryAdmin || lockedForManager)
-      ? `<button class="btn btn-sm btn-outline-secondary fw-bold" disabled title="${lockedForManager ? 'Managers cannot delete Admin accounts' : (isSelf ? 'Cannot delete current user' : 'Primary admin cannot be deleted')}"><i class="fa-solid fa-lock"></i></button>`
-      : `<button class="btn btn-sm btn-outline-danger fw-bold" onclick="deleteUserById('${escapeHtml(u.UserID)}', '${escapeHtml(u.FullName)}')"><i class="fa-solid fa-trash me-1"></i>Delete</button>`;
-
-    return `<tr>
-      <td>${escapeHtml(u.FullName)}</td>
-      <td>${escapeHtml(u.Username)}</td>
-      <td class="small">${u.Email ? escapeHtml(u.Email) : '<span class="text-muted">—</span>'}</td>
-      <td><span class="badge ${isTargetAdmin ? 'bg-danger' : 'bg-primary'}">${escapeHtml(u.Role)}</span></td>
-      <td>${escapeHtml(branchMap[u.BranchID] || (u.Role === 'Admin' ? 'All Branches' : 'Main'))}</td>
-      <td>${u.Active ? '✓' : '✗'}</td>
-      <td class="small text-muted">${u.LastLogin ? new Date(u.LastLogin).toLocaleString() : '—'}</td>
-      <td class="text-end text-nowrap">
-        ${editBtn}
-        ${delBtn}
-      </td>
-    </tr>`;
-  }).join(''));
-}
-
-function editUserRow(uid) {
-  const u = (state.users || []).find(x => x.UserID === uid);
-  if (!u) return;
-  if (state.user?.role === 'Manager' && u.Role === 'Admin') {
-    return toast('Managers are not permitted to edit Admin accounts.', 'warning');
-  }
-  syncUserRoleDropdown();
-  $('cfgUserId').value = u.UserID;
-  $('cfgUserFullName').value = u.FullName;
-  $('cfgUserUsername').value = u.Username;
-  if ($('cfgUserEmail')) $('cfgUserEmail').value = u.Email || '';
-  $('cfgUserPassword').value = '';
-  $('cfgUserRole').value = u.Role;
-  if ($('cfgUserBranch')) $('cfgUserBranch').value = u.BranchID || '';
-  if ($('cfgUserFormTitle')) $('cfgUserFormTitle').textContent = `Edit User (${u.FullName})`;
-}
-
-function resetUserForm() {
-  syncUserRoleDropdown();
-  $('cfgUserId').value = '';
-  $('cfgUserFullName').value = '';
-  $('cfgUserUsername').value = '';
-  if ($('cfgUserEmail')) $('cfgUserEmail').value = '';
-  $('cfgUserPassword').value = '';
-  $('cfgUserRole').value = 'Waiter';
-  if ($('cfgUserBranch')) $('cfgUserBranch').value = state.activeBranchId || '';
-  if ($('cfgUserFormTitle')) $('cfgUserFormTitle').textContent = 'Add / Edit User';
-}
-
-async function deleteUserById(userId, fullName) {
-  const target = (state.users || []).find(x => String(x.UserID) === String(userId));
-  if (state.user?.role === 'Manager' && target && target.Role === 'Admin') {
-    return toast('Managers cannot delete Admin accounts.', 'warning');
-  }
-  if (!confirm(`Delete user "${fullName}"? Their active sessions will be terminated immediately.`)) return;
-  try {
-    showLoading(`Deleting ${fullName}…`);
-    const res = await callServer('deleteUser', state.token, userId);
-    if ($('cfgUserId').value === userId) resetUserForm();
-    showDone(res.message || 'User deleted!', () => loadBootstrap());
-  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
-}
-
-function onToggleDisableKds(el) {
-  if (el.checked && !confirm('Disable the Kitchen Display System?')) el.checked = false;
-}
-
-async function saveSettings(e) {
-  e.preventDefault();
-  try {
-    showLoading('Saving branch settings…');
-    await callServer('saveSystemSettings', state.token, {
-      RESTAURANT_NAME: $('cfgRestaurantName').value, TAX_RATE_PERCENT: $('cfgTaxRate').value,
-      SERVICE_CHARGE_PERCENT: $('cfgServiceCharge').value, SENIOR_PWD_DISCOUNT_PERCENT: $('cfgSeniorPwdDiscount').value,
-      ENABLE_TAX: $('cfgEnableTax').checked ? 'true' : 'false', VAT_INCLUSIVE: $('cfgVatInclusive').checked ? 'true' : 'false',
-      ENABLE_SERVICE_CHARGE: $('cfgEnableServiceCharge').checked ? 'true' : 'false', DISABLE_KDS: $('cfgDisableKds').checked ? 'true' : 'false',
-      CURRENCY_SYMBOL: $('cfgCurrency').value, TIMEZONE: $('cfgTimezone').value, RECEIPT_FOOTER: $('cfgReceiptFooter').value
+    const catById = {};
+    const catByName = {};
+    (state.categories || []).forEach(c => {
+      catById[String(c.CategoryID)] = c;
+      catByName[String(c.CategoryName || '').trim().toLowerCase()] = c;
     });
-    showDone('Settings saved!', () => { loadBootstrap(); poll(true); });
-  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
+
+    let imported = 0;
+    for (let i = 0; i < dataRows.length; i++) {
+      const cols = dataRows[i];
+      const name = (cols[nameIdx] || '').trim();
+      if (!name) continue;
+
+      const csvId = idIdx !== undefined ? (cols[idIdx] || '').trim() : '';
+      const desc = descIdx !== undefined ? (cols[descIdx] || '').trim() : '';
+      const rawSort = sortIdx !== undefined ? parseInt(cols[sortIdx], 10) : NaN;
+
+      const existing = (csvId && catById[csvId]) || catByName[name.toLowerCase()];
+      const targetId = existing ? existing.CategoryID : '';
+      const sortOrder = !isNaN(rawSort) ? rawSort : (existing?.SortOrder ?? ((state.categories.length || 0) + imported + 1));
+
+      await callServer('saveCategory', state.token, {
+        CategoryID: targetId,
+        CategoryName: name,
+        Description: desc || (existing?.Description || ''),
+        SortOrder: sortOrder
+      });
+      imported++;
+    }
+
+    inputEl.value = '';
+    showDone(`Imported ${imported} category row(s)!`, async () => {
+      await loadBootstrap();
+    });
+  } catch (err) {
+    hideLoading();
+    if (inputEl) inputEl.value = '';
+    toast(err.message || 'Failed to import category CSV.', 'danger');
+  }
 }
 
 async function saveTable(e) {
   e.preventDefault();
+  const tableId = $('cfgTableId').value;
   try {
-    showLoading('Saving table…');
-    await callServer('saveTable', state.token, { TableID: $('cfgTableId').value, TableNumber: $('cfgTableName').value, Capacity: $('cfgTableCapacity').value });
-    showDone('Table saved!', () => { resetTableForm(); loadBootstrap(); poll(true); });
+    showLoading(tableId ? 'Updating table…' : 'Saving table…');
+    await callServer('saveTable', state.token, {
+      TableID: tableId || null,
+      TableNumber: $('cfgTableName').value,
+      Capacity: $('cfgTableCapacity').value
+    });
+    showDone(tableId ? 'Table updated!' : 'Table saved!', () => {
+      resetTableForm();
+      loadBootstrap();
+    });
+  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
+}
+
+async function deleteTable(tableId) {
+  const t = (state.tables || []).find(x => x.TableID === tableId);
+  if (t && t.Status !== 'Available') {
+    return toast(`Cannot delete ${t.TableNumber} while status is "${t.Status}". Free/clean it first.`, 'warning');
+  }
+  if (!confirm(`Delete ${t ? t.TableNumber : 'this table'}?`)) return;
+  try {
+    showLoading('Deleting table…');
+    const r = await callServer('deleteTable', state.token, tableId);
+    if ($('cfgTableId').value === tableId) resetTableForm();
+    showDone(r.message || 'Table deleted', () => loadBootstrap());
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
 async function saveCategory(e) {
   e.preventDefault();
+  try { showLoading('Saving category…'); await callServer('saveCategory', state.token, { CategoryName: $('cfgCatName').value, Description: $('cfgCatDesc').value }); showDone('Category saved!', () => { $('cfgCatName').value = ''; $('cfgCatDesc').value = ''; loadBootstrap(); }); }
+  catch (err) { hideLoading(); toast(err.message, 'danger'); }
+}
+
+async function deleteCategory(catId, catName) {
+  if (!confirm(`Delete category "${catName}"?`)) return;
   try {
-    showLoading('Saving…');
-    await callServer('saveCategory', state.token, { CategoryName: $('cfgCatName').value, Description: $('cfgCatDesc').value });
-    showDone('Category saved!', () => { $('cfgCatName').value = ''; $('cfgCatDesc').value = ''; loadBootstrap(); });
+    showLoading(`Deleting ${catName}…`);
+    const res = await callServer('deleteCategory', state.token, catId);
+    showDone(res.message || 'Category deleted!', () => loadBootstrap());
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
+}
+
+function editUser(id) {
+  const u = (state.users || []).find(x => String(x.UserID) === String(id));
+  if (!u) return toast('User not found.', 'warning');
+  if (!isGlobalAdmin() && u.Role === 'Admin') {
+    return toast('Only Admin users can edit Admin accounts.', 'warning');
+  }
+  $('cfgUserId').value = u.UserID;
+  $('cfgUserFullName').value = u.FullName;
+  $('cfgUserUsername').value = u.Username;
+  $('cfgUserEmail').value = u.Email || '';
+  $('cfgUserPassword').value = '';
+  $('cfgUserPassword').placeholder = 'Leave blank to keep password';
+  $('cfgUserRole').value = u.Role;
+  $('cfgUserBranch').value = u.BranchID || '';
+  $('cfgUserFormTitle').textContent = `Edit User (${u.FullName})`;
+  $('cfgUserFullName').focus();
+}
+
+function resetUserForm() {
+  $('cfgUserId').value = '';
+  $('cfgUserFullName').value = '';
+  $('cfgUserUsername').value = '';
+  $('cfgUserEmail').value = '';
+  $('cfgUserPassword').value = '';
+  $('cfgUserPassword').placeholder = 'Password';
+  $('cfgUserFormTitle').textContent = 'Add / Edit User';
 }
 
 async function saveUser(e) {
   e.preventDefault();
-  const role = $('cfgUserRole').value;
-  if (state.user?.role === 'Manager' && role === 'Admin') {
-    return toast('Managers are not allowed to assign the Admin role.', 'warning');
-  }
+  const isNew = !$('cfgUserId').value;
+  if (isNew && !$('cfgUserPassword').value) return toast('Password is required for a new user.', 'warning');
   try {
-    showLoading('Saving…');
+    showLoading('Saving user…');
     await callServer('saveUser', state.token, {
-      UserID: $('cfgUserId').value,
+      UserID: $('cfgUserId').value || null,
       FullName: $('cfgUserFullName').value,
       Username: $('cfgUserUsername').value,
-      Email: $('cfgUserEmail')?.value.trim() || '',
+      Email: $('cfgUserEmail').value.trim(),
       Password: $('cfgUserPassword').value,
-      Role: role,
-      BranchID: $('cfgUserBranch')?.value || null
+      Role: $('cfgUserRole').value,
+      BranchID: $('cfgUserBranch').value || null
     });
-    showDone('User saved!', () => { resetUserForm(); loadBootstrap(); });
+    showDone('User saved!', () => {
+      resetUserForm();
+      loadBootstrap();
+    });
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
+}
+
+async function deleteUserById(userId, fullName) {
+  if (!confirm(`Delete user "${fullName}"? This will revoke their login access immediately.`)) return;
+  try {
+    showLoading(`Deleting ${fullName}…`);
+    const res = await callServer('deleteUser', state.token, userId);
+    if (String($('cfgUserId').value) === String(userId)) resetUserForm();
+    showDone(res.message || 'User deleted!', () => loadBootstrap());
+  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
+}
+
+function openChangePasswordModal() { $('cpOldPw').value = ''; $('cpNewPw').value = ''; $('cpNewPw2').value = ''; showModal('changePwModal'); }
+async function submitChangePassword() {
+  const oldPw = $('cpOldPw').value, newPw = $('cpNewPw').value;
+  if (newPw.length < 6) return toast('New password must be at least 6 characters.', 'warning');
+  if (newPw !== $('cpNewPw2').value) return toast('New passwords do not match.', 'warning');
+  try { showLoading('Updating password…'); await callServer('changePassword', state.token, oldPw, newPw); showDone('Password updated!', () => hideModal('changePwModal')); }
+  catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
 async function loadAdminStats() {
   try {
-    const data = await callServer('getSalesReport', state.token, { summaryOnly: true });
-    $('statSales').textContent = `${curr()}${(data.totalSales || 0).toFixed(2)}`;
-    $('statOrders').textContent = data.totalOrders || 0;
-    $('statAvg').textContent = `${curr()}${(data.averageOrderValue || 0).toFixed(2)}`;
-    $('statTax').textContent = `${curr()}${(data.totalTax || 0).toFixed(2)}`;
-  } catch (e) {}
+    const s = await callServer('getSalesReport', state.token, { summaryOnly: true, allBranches: false });
+    $('statSales').textContent = `${curr()}${Number(s.totalSales || 0).toFixed(2)}`;
+    $('statOrders').textContent = s.totalOrders || 0;
+    $('statAvg').textContent = `${curr()}${Number(s.averageOrderValue || 0).toFixed(2)}`;
+    $('statTax').textContent = `${curr()}${Number(s.totalTax || 0).toFixed(2)}`;
+  } catch (err) {}
 }
 
 async function loadActivityLogs() {
+  if (!isGlobalAdmin()) {
+    if ($('logsTableBody')) $('logsTableBody').innerHTML = '';
+    return;
+  }
   try {
-    const logs = await callServer('getActivityLog', state.token, { limit: 300 });
-    $('logsTableBody').innerHTML = (logs || []).map(l => `<tr><td class="small">${new Date(l.Timestamp).toLocaleString()}</td><td class="small">${escapeHtml(l.UserID)}</td><td>${escapeHtml(l.Action)}</td><td>${escapeHtml(l.EntityType)} ${escapeHtml(l.EntityID || '')}</td><td class="small text-muted">${escapeHtml(String(l.NewValue || '').slice(0, 80))}</td></tr>`).join('');
-  } catch (e) {}
+    const logs = await callServer('getActivityLog', state.token);
+    const userMap = {};
+    (state.users || []).forEach(u => { userMap[u.UserID] = u.FullName; });
+    $('logsTableBody').innerHTML = (logs || []).map(l => `<tr><td><small>${new Date(l.Timestamp).toLocaleString()}</small></td><td>${escapeHtml(userMap[l.UserID] || l.UserID || 'System')}</td><td><span class="badge bg-info text-dark">${escapeHtml(l.Action)}</span></td><td>${escapeHtml(l.EntityType)}</td><td><small>${escapeHtml(l.NewValue)}</small></td></tr>`).join('');
+  } catch (err) { toast(err.message, 'danger'); }
 }
 
-let _lastSalesReport = null;
-function shiftDate(str, days) { const d = new Date(str + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); }
-function setReportRange(kind) {
-  const today = todayStr(); let s = '', e = '';
-  if (kind === 'today') { s = today; e = today; }
-  else if (kind === '7d') { s = shiftDate(today, -6); e = today; }
-  else if (kind === 'month') { s = today.slice(0, 8) + '01'; e = today; }
-  $('reportStart').value = s; $('reportEnd').value = e;
+function setReportRange(preset) {
+  const t = todayStr(), d = new Date(t + 'T12:00:00');
+  const iso = x => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+  if (preset === 'today') { $('reportStart').value = t; $('reportEnd').value = t; }
+  else if (preset === '7d') { d.setDate(d.getDate() - 6); $('reportStart').value = iso(d); $('reportEnd').value = t; }
+  else if (preset === 'month') { $('reportStart').value = t.slice(0, 8) + '01'; $('reportEnd').value = t; }
+  else if (preset === 'all') { $('reportStart').value = ''; $('reportEnd').value = ''; }
   loadSalesReport();
 }
 
 async function loadSalesReport() {
   try {
     showLoading('Generating report…');
-    const allBranches = ($('reportBranchScope')?.value === 'ALL') && state.user?.role === 'Admin';
-    const data = await callServer('getSalesReport', state.token, {
+    // Only Admin can select All Branches; non-Admin is strictly restricted to their assigned branch
+    const allBranches = isGlobalAdmin() && ($('reportBranchScope')?.value === 'ALL');
+    const r = await callServer('getSalesReport', state.token, {
       startDate: $('reportStart').value,
       endDate: $('reportEnd').value,
       allBranches
     });
-    _lastSalesReport = data;
-    const c = data.currency || curr(), fmt = n => `${c}${Number(n || 0).toFixed(2)}`;
-    const t = data.totals || {}, cnt = data.counts || {};
+    hideLoading(); window._lastSalesReport = r;
+    const c = r.currency || curr();
     const activeBr = (state.branches || []).find(b => b.BranchID === state.activeBranchId);
     if ($('reportScopeBadge')) {
       $('reportScopeBadge').textContent = allBranches ? 'All Branches (Consolidated)' : (activeBr ? `${activeBr.BranchName} (${activeBr.BranchCode})` : 'Current Branch');
     }
 
     $('reportSummary').innerHTML = `
-      <div class="row g-2 mb-2">
-        <div class="col-6 col-md-3"><div class="stat-card bg-primary"><h6>Total Sales</h6><h4>${fmt(t.sales)}</h4></div></div>
-        <div class="col-6 col-md-3"><div class="stat-card bg-success"><h6>Paid Orders</h6><h4>${cnt.paid || 0}</h4></div></div>
-        <div class="col-6 col-md-3"><div class="stat-card bg-warning"><h6>Avg Order</h6><h4>${fmt(data.averageOrderValue)}</h4></div></div>
-        <div class="col-6 col-md-3"><div class="stat-card bg-info"><h6>Items Sold</h6><h4>${t.items || 0}</h4></div></div>
-      </div>
-      <div class="table-responsive"><table class="table table-sm table-bordered mb-0">
-        <tr><th>Gross Subtotal</th><td>${fmt(t.subtotal)}</td><th>Discounts</th><td class="text-danger">-${fmt(t.discount)}</td><th>Tax</th><td>${fmt(t.tax)}</td></tr>
-        <tr><th>Service Charge</th><td>${fmt(t.service)}</td><th>Cancelled / Voided</th><td>${cnt.cancelled || 0}</td><th>Open Orders</th><td>${cnt.open || 0}</td></tr>
-      </table></div>`;
+      <div class="row g-2">
+        <div class="col-6 col-md-2"><div class="card p-2 text-center border-primary"><small class="text-muted">Paid Orders</small><h5>${r.counts.paid}</h5></div></div>
+        <div class="col-6 col-md-2"><div class="card p-2 text-center border-success"><small class="text-muted">Total Sales</small><h5 class="text-success">${c}${Number(r.totals.sales || 0).toFixed(2)}</h5></div></div>
+        <div class="col-6 col-md-2"><div class="card p-2 text-center border-warning"><small class="text-muted">Avg Order</small><h5>${c}${Number(r.averageOrderValue || 0).toFixed(2)}</h5></div></div>
+        <div class="col-6 col-md-2"><div class="card p-2 text-center border-info"><small class="text-muted">Items Sold</small><h5>${r.totals.items}</h5></div></div>
+        <div class="col-6 col-md-2"><div class="card p-2 text-center"><small class="text-muted">Discounts / Tax</small><h6>-${c}${Number(r.totals.discount || 0).toFixed(2)} / ${c}${Number(r.totals.tax || 0).toFixed(2)}</h6></div></div>
+        <div class="col-6 col-md-2"><div class="card p-2 text-center border-danger"><small class="text-muted">Refunds / Voids (${r.counts.refunds || 0})</small><h6 class="text-danger">${c}${Number(r.totals.refunded || 0).toFixed(2)}</h6></div></div>
+      </div>`;
 
-    if (allBranches) {
-      const bRows = (data.branchBreakdown || []).map(b => `<tr>
-        <td><strong>${escapeHtml(b.branchName)}</strong></td>
-        <td class="text-end">${b.orders}</td>
-        <td class="text-end">${fmt(b.subtotal)}</td>
-        <td class="text-end text-danger">-${fmt(b.discount)}</td>
-        <td class="text-end">${fmt(b.tax)}</td>
-        <td class="text-end">${fmt(b.avgOrder)}</td>
-        <td class="text-end fw-bold text-primary">${fmt(b.sales)}</td>
-        <td class="text-end"><span class="badge bg-primary">${b.share}%</span></td>
-      </tr>`).join('');
-      $('reportBranchComparison').innerHTML = `
-        <h6 class="mt-3 fw-bold"><i class="fa-solid fa-store text-primary me-1"></i>Branch Sales Breakdown</h6>
-        <div class="table-responsive">
-          <table class="table table-sm table-hover align-middle">
-            <thead>
-              <tr>
-                <th>Branch</th>
-                <th class="text-end">Orders</th>
-                <th class="text-end">Gross</th>
-                <th class="text-end">Discounts</th>
-                <th class="text-end">Tax</th>
-                <th class="text-end">Avg Order</th>
-                <th class="text-end">Total Sales</th>
-                <th class="text-end">Share</th>
-              </tr>
-            </thead>
-            <tbody>${bRows || '<tr><td colspan="8" class="text-muted text-center">No branch sales recorded.</td></tr>'}</tbody>
-          </table>
-        </div>`;
-    } else {
-      $('reportBranchComparison').innerHTML = '';
-    }
+    const brList = r.branchBreakdown || [];
+    $('reportBranchComparison').innerHTML = (allBranches && brList.length) ? `
+      <h6 class="mt-2 fw-bold text-primary"><i class="fa-solid fa-store me-1"></i>Sales by Branch</h6>
+      <div class="table-responsive"><table class="table table-sm table-bordered">
+        <thead class="table-light"><tr><th>Branch</th><th class="text-end">Orders</th><th class="text-end">Avg Order</th><th class="text-end">Discounts</th><th class="text-end">Tax</th><th class="text-end">Total Sales</th><th class="text-end">Share</th></tr></thead>
+        <tbody>${brList.map(b => `<tr><td><strong>${escapeHtml(b.branchName)}</strong></td><td class="text-end">${b.orders}</td><td class="text-end">${c}${b.avgOrder.toFixed(2)}</td><td class="text-end">-${c}${b.discount.toFixed(2)}</td><td class="text-end">${c}${b.tax.toFixed(2)}</td><td class="text-end text-success fw-bold">${c}${b.sales.toFixed(2)}</td><td class="text-end">${b.share}%</td></tr>`).join('')}</tbody>
+      </table></div>` : '';
 
-    $('reportPaymentMethods').innerHTML = `<h6 class="mt-3 fw-bold">Payment Method Breakdown</h6><table class="table table-sm"><thead><tr><th>Method</th><th class="text-end">Orders</th><th class="text-end">Total</th><th class="text-end">Share</th></tr></thead><tbody>${(data.paymentBreakdown || []).map(p => `<tr><td>${escapeHtml(p.method)}</td><td class="text-end">${p.orders}</td><td class="text-end">${fmt(p.sales)}</td><td class="text-end">${p.share}%</td></tr>`).join('') || '<tr><td colspan="4" class="text-muted">No paid orders.</td></tr>'}</tbody></table>`;
-    $('reportTopItems').innerHTML = `<table class="table table-sm"><thead><tr><th>#</th><th>Item</th><th class="text-end">Qty</th><th class="text-end">Avg Price</th><th class="text-end">Sales</th><th class="text-end">Share</th></tr></thead><tbody>${(data.topItems || []).map((x, idx) => `<tr><td>${idx + 1}</td><td>${escapeHtml(x.name)}</td><td class="text-end">${x.quantity}</td><td class="text-end">${fmt(x.avgPrice)}</td><td class="text-end">${fmt(x.sales)}</td><td class="text-end">${x.share}%</td></tr>`).join('') || '<tr><td colspan="6" class="text-muted">No items sold.</td></tr>'}</tbody></table>`;
-    $('reportDaily').innerHTML = `<table class="table table-sm"><thead><tr><th>Date</th><th class="text-end">Orders</th><th class="text-end">Subtotal</th><th class="text-end">Discount</th><th class="text-end">Tax</th><th class="text-end">Service</th><th class="text-end">Total</th></tr></thead><tbody>${(data.daily || []).map(d => `<tr><td>${escapeHtml(d.date)}</td><td class="text-end">${d.orders}</td><td class="text-end">${fmt(d.subtotal)}</td><td class="text-end">-${fmt(d.discount)}</td><td class="text-end">${fmt(d.tax)}</td><td class="text-end">${fmt(d.service)}</td><td class="text-end fw-bold">${fmt(d.sales)}</td></tr>`).join('') || '<tr><td colspan="7" class="text-muted">No sales in selected range.</td></tr>'}</tbody></table>`;
-    $('reportOrders').innerHTML = `<div class="table-responsive" style="max-height:360px; overflow:auto;"><table class="table table-sm table-hover"><thead><tr><th>Date</th><th>Time</th>${allBranches ? '<th>Branch</th>' : ''}<th>Order #</th><th>Table</th><th>Customer</th><th>Payment</th><th class="text-end">Items</th><th class="text-end">Subtotal</th><th class="text-end">Discount</th><th class="text-end">Tax</th><th class="text-end">Service</th><th class="text-end">Total</th></tr></thead><tbody>${(data.orders || []).map(o => `<tr><td class="small">${escapeHtml(o.date)}</td><td class="small">${escapeHtml(o.time)}</td>${allBranches ? `<td class="small"><span class="badge bg-dark">${escapeHtml(o.branch)}</span></td>` : ''}<td><strong>${escapeHtml(o.orderNumber)}</strong></td><td>${escapeHtml(o.table)}</td><td>${escapeHtml(o.customer)}</td><td class="small">${escapeHtml(o.method)}</td><td class="text-end">${o.itemQty}</td><td class="text-end">${fmt(o.subtotal)}</td><td class="text-end">-${fmt(o.discount)}</td><td class="text-end">${fmt(o.tax)}</td><td class="text-end">${fmt(o.service)}</td><td class="text-end fw-bold">${fmt(o.total)}</td></tr>`).join('') || `<tr><td colspan="${allBranches ? 13 : 12}" class="text-muted">No paid orders.</td></tr>`}</tbody></table></div>`;
-    hideLoading();
+    const pmList = r.paymentBreakdown || [];
+    $('reportPaymentMethods').innerHTML = pmList.length ? `
+      <h6 class="mt-2 fw-bold text-secondary"><i class="fa-solid fa-wallet me-1"></i>Payment Method Breakdown</h6>
+      <div class="table-responsive"><table class="table table-sm table-bordered">
+        <thead class="table-light"><tr><th>Payment Method</th><th class="text-end">Orders</th><th class="text-end">Total Sales</th><th class="text-end">Share</th></tr></thead>
+        <tbody>${pmList.map(p => `<tr><td><strong>${escapeHtml(p.method)}</strong></td><td class="text-end">${p.orders}</td><td class="text-end fw-bold">${c}${p.sales.toFixed(2)}</td><td class="text-end">${p.share}%</td></tr>`).join('')}</tbody>
+      </table></div>` : '';
+
+    $('reportTopItems').innerHTML = r.topItems.length
+      ? `<div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr><th>#</th><th>Item</th><th class="text-end">Qty</th><th class="text-end">Avg Price</th><th class="text-end">Sales</th><th class="text-end">Share</th></tr></thead><tbody>${r.topItems.map((i, idx) => `<tr><td>${idx + 1}</td><td>${escapeHtml(i.name)}</td><td class="text-end">${i.quantity}</td><td class="text-end">${c}${i.avgPrice.toFixed(2)}</td><td class="text-end">${c}${i.sales.toFixed(2)}</td><td class="text-end">${i.share}%</td></tr>`).join('')}</tbody></table></div>`
+      : '<p class="text-muted small">No items sold in this period.</p>';
+
+    $('reportDaily').innerHTML = r.daily.length
+      ? `<div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr><th>Date</th><th class="text-end">Orders</th><th class="text-end">Subtotal</th><th class="text-end">Discount</th><th class="text-end">Tax</th><th class="text-end">Service</th><th class="text-end">Sales</th></tr></thead><tbody>${r.daily.map(d => `<tr><td>${escapeHtml(d.date)}</td><td class="text-end">${d.orders}</td><td class="text-end">${c}${d.subtotal.toFixed(2)}</td><td class="text-end">-${c}${d.discount.toFixed(2)}</td><td class="text-end">${c}${d.tax.toFixed(2)}</td><td class="text-end">${c}${d.service.toFixed(2)}</td><td class="text-end"><strong>${c}${d.sales.toFixed(2)}</strong></td></tr>`).join('')}</tbody></table></div>`
+      : '<p class="text-muted small">No paid orders in this period.</p>';
+
+    $('reportOrders').innerHTML = r.orders.length
+      ? `<div class="table-responsive" style="max-height:360px;"><table class="table table-sm table-bordered"><thead><tr><th>Date</th><th>Time</th>${allBranches ? '<th>Branch</th>' : ''}<th>Order #</th><th>Table</th><th>Customer</th><th>Method</th><th class="text-end">Items</th><th class="text-end">Total</th></tr></thead><tbody>${r.orders.map(o => `<tr><td>${escapeHtml(o.date)}</td><td>${escapeHtml(o.time)}</td>${allBranches ? `<td><span class="badge bg-light text-dark border">${escapeHtml(o.branch)}</span></td>` : ''}<td>${escapeHtml(o.orderNumber)}</td><td>${escapeHtml(o.table)}</td><td>${escapeHtml(o.customer)}</td><td>${escapeHtml(o.method)}</td><td class="text-end">${o.itemQty}</td><td class="text-end"><strong>${c}${o.total.toFixed(2)}</strong></td></tr>`).join('')}</tbody></table></div>`
+      : '<p class="text-muted small">No orders to list.</p>';
+
+    const refList = r.refunds || [];
+    $('reportRefunds').innerHTML = refList.length
+      ? `<div class="table-responsive" style="max-height:300px;"><table class="table table-sm table-bordered border-danger">
+          <thead class="table-danger"><tr><th>Date / Time</th>${allBranches ? '<th>Branch</th>' : ''}<th>Order #</th><th>Table</th><th>Action</th><th class="text-end">Amount</th><th>Reason / Items</th><th>Processed By</th></tr></thead>
+          <tbody>${refList.map(rf => `<tr>
+            <td class="small">${escapeHtml(rf.dateTime)}</td>
+            ${allBranches ? `<td><span class="badge bg-light text-dark border">${escapeHtml(rf.branch)}</span></td>` : ''}
+            <td><strong>${escapeHtml(rf.orderNumber)}</strong></td>
+            <td>${escapeHtml(rf.table)}</td>
+            <td><span class="badge bg-danger">${escapeHtml(rf.action)}</span></td>
+            <td class="text-end text-danger fw-bold">${c}${Number(rf.amount || 0).toFixed(2)}</td>
+            <td class="small">${escapeHtml(rf.details)}</td>
+            <td class="small">${escapeHtml(rf.staff)}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>`
+      : '<p class="text-muted small">No order edits, item refunds, or voids recorded in this period.</p>';
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
-function printSalesReport() {
-  if (!_lastSalesReport) return toast('Generate a sales report first.', 'warning');
-  const d = _lastSalesReport, c = d.currency || curr(), fmt = n => `${c}${Number(n || 0).toFixed(2)}`;
-  const t = d.totals || {}, cnt = d.counts || {};
-  const activeBr = (state.branches || []).find(b => b.BranchID === state.activeBranchId);
-  const scopeTitle = d.allBranches ? 'ALL BRANCHES (CONSOLIDATED)' : (activeBr ? `${activeBr.BranchName} (${activeBr.BranchCode})` : 'CURRENT BRANCH');
-  const r = (a, b, bold) => `<div style="display:flex; justify-content:space-between;${bold ? ' font-weight:bold; font-size:1.05em;' : ''}"><span>${a}</span><span>${b}</span></div>`;
-
-  const branchSection = d.allBranches ? `
-    <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    <div style="font-weight:bold;">BY BRANCH</div>
-    ${(d.branchBreakdown || []).map(b => r(`${escapeHtml(b.branchName)} (${b.orders})`, `${fmt(b.sales)} (${b.share}%)`)).join('') || '<div>None</div>'}
-  ` : '';
-
-  const body = `
-    <div style="text-align:center; font-weight:bold; font-size:1.1em;">${escapeHtml(state.settings.RESTAURANT_NAME || 'Tuna Choice POS')}</div>
-    <div style="text-align:center; font-weight:bold;">SALES REPORT</div>
-    <div style="text-align:center; font-size:0.85em;">${escapeHtml(scopeTitle)}</div>
-    <div style="text-align:center; font-size:0.85em;">${escapeHtml(d.range?.start || 'All Time')} to ${escapeHtml(d.range?.end || 'Present')}</div>
-    <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    ${r('Paid Orders', cnt.paid || 0)}${r('Cancelled / Voided', cnt.cancelled || 0)}${r('Open Orders', cnt.open || 0)}${r('Items Sold', t.items || 0)}
-    <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    ${r('Gross Subtotal', fmt(t.subtotal))}${r('Discounts', '-' + fmt(t.discount))}${r('Tax', fmt(t.tax))}${r('Service Charge', fmt(t.service))}
-    <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    ${r('TOTAL SALES', fmt(t.sales), true)}${r('Average Order', fmt(d.averageOrderValue))}
-    ${branchSection}
-    <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    <div style="font-weight:bold;">BY PAYMENT METHOD</div>${(d.paymentBreakdown || []).map(p => r(`${escapeHtml(p.method)} (${p.orders})`, fmt(p.sales))).join('') || '<div>None</div>'}
-    <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    <div style="font-weight:bold;">TOP SELLING ITEMS</div>${(d.topItems || []).slice(0, 15).map(x => r(`${x.quantity}x ${escapeHtml(x.name)}`, fmt(x.sales))).join('') || '<div>None</div>'}
-    <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    <div style="text-align:center; font-size:0.85em;">Printed ${new Date().toLocaleString()}</div>`;
-  printHtmlDocument('Sales Report', body);
+function exportSalesReportCsv() {
+  const r = window._lastSalesReport; if (!r) return toast('Generate a report first.', 'warning');
+  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = [['Sales Report', `${r.range.start || 'All'} to ${r.range.end || 'All'}`].map(esc).join(','),
+    ['Paid Orders', r.counts.paid, 'Total Sales', r.totals.sales.toFixed(2), 'Average Order', r.averageOrderValue.toFixed(2), 'Refunded/Voided', Number(r.totals.refunded || 0).toFixed(2)].map(esc).join(','), '',
+    ['Branch', 'Orders', 'Avg Order', 'Discounts', 'Tax', 'Total Sales', 'Share %'].map(esc).join(',')];
+  (r.branchBreakdown || []).forEach(b => lines.push([b.branchName, b.orders, b.avgOrder.toFixed(2), b.discount.toFixed(2), b.tax.toFixed(2), b.sales.toFixed(2), b.share].map(esc).join(',')));
+  lines.push('', ['Item', 'Quantity', 'Avg Price', 'Sales', 'Share %'].map(esc).join(','));
+  r.topItems.forEach(i => lines.push([i.name, i.quantity, i.avgPrice.toFixed(2), i.sales.toFixed(2), i.share].map(esc).join(',')));
+  lines.push('', ['Date', 'Time', 'Branch', 'Order #', 'Table', 'Customer', 'Method', 'Items', 'Subtotal', 'Discount', 'Tax', 'Service', 'Total'].map(esc).join(','));
+  r.orders.forEach(o => lines.push([o.date, o.time, o.branch, o.orderNumber, o.table, o.customer, o.method, o.itemQty, o.subtotal.toFixed(2), o.discount.toFixed(2), o.tax.toFixed(2), o.service.toFixed(2), o.total.toFixed(2)].map(esc).join(',')));
+  lines.push('', ['Edit Order / Item Refunds & Voids Log'].map(esc).join(','), ['Date/Time', 'Branch', 'Order #', 'Table', 'Action', 'Amount', 'Details', 'Processed By'].map(esc).join(','));
+  (r.refunds || []).forEach(rf => lines.push([rf.dateTime, rf.branch, rf.orderNumber, rf.table, rf.action, Number(rf.amount || 0).toFixed(2), rf.details, rf.staff].map(esc).join(',')));
+  const blob = new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `sales_report_${r.range.start || 'all'}_${r.range.end || 'all'}.csv`;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 100);
 }
 
-function exportSalesReportCsv() {
-  if (!_lastSalesReport) return toast('Generate a sales report first.', 'warning');
-  const d = _lastSalesReport, esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const lines = [['Date', 'Time', 'Branch', 'Order #', 'Table', 'Customer', 'Payment Method', 'Items', 'Subtotal', 'Discount', 'Tax', 'Service Charge', 'Total'].map(esc).join(',')];
-  (d.orders || []).forEach(o => lines.push([o.date, o.time, o.branch, o.orderNumber, o.table, o.customer, o.method, o.itemQty, o.subtotal.toFixed(2), o.discount.toFixed(2), o.tax.toFixed(2), o.service.toFixed(2), o.total.toFixed(2)].map(esc).join(',')));
-  const a = document.createElement('a');
-  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(lines.join('\n'));
-  a.download = `sales_report_${d.allBranches ? 'ALL_BRANCHES' : (state.activeBranchId || 'branch')}_${d.range?.start || 'all'}_to_${d.range?.end || 'now'}.csv`;
-  a.click();
+function buildSalesReportPrintHtml(r) {
+  const c = r.currency || curr();
+  const s = state.settings || {};
+  const brList = r.branchBreakdown || [];
+  const pmList = r.paymentBreakdown || [];
+  const refList = r.refunds || [];
+  return `
+    <div style="text-align:center;font-weight:bold;font-size:15px;">${escapeHtml(s.RESTAURANT_NAME || 'Tuna Choice POS')}</div>
+    <div style="text-align:center;font-weight:bold;font-size:12px;">SALES REPORT (${r.allBranches ? 'ALL BRANCHES' : 'CURRENT BRANCH'})</div>
+    <div style="text-align:center;font-size:11px;">Period: ${escapeHtml(r.range.start || 'Beginning')} to ${escapeHtml(r.range.end || 'Present')}</div>
+    <div style="border-bottom:1px dashed #000;margin:6px 0;"></div>
+    <div style="font-size:11px;">
+      <div style="display:flex;justify-content:space-between;"><span>Paid Orders:</span><strong>${r.counts.paid}</strong></div>
+      <div style="display:flex;justify-content:space-between;"><span>Items Sold:</span><strong>${r.totals.items}</strong></div>
+      <div style="display:flex;justify-content:space-between;"><span>Subtotal:</span><span>${c}${Number(r.totals.subtotal || 0).toFixed(2)}</span></div>
+      <div style="display:flex;justify-content:space-between;"><span>Discounts:</span><span>-${c}${Number(r.totals.discount || 0).toFixed(2)}</span></div>
+      <div style="display:flex;justify-content:space-between;"><span>Tax Collected:</span><span>${c}${Number(r.totals.tax || 0).toFixed(2)}</span></div>
+      <div style="display:flex;justify-content:space-between;"><span>Refunds / Voids (${r.counts.refunds || 0}):</span><span>${c}${Number(r.totals.refunded || 0).toFixed(2)}</span></div>
+      <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:13px;border-top:1px solid #000;padding-top:3px;margin-top:3px;"><span>NET TOTAL SALES:</span><span>${c}${Number(r.totals.sales || 0).toFixed(2)}</span></div>
+    </div>
+    ${(r.allBranches && brList.length) ? `<div style="border-bottom:1px dashed #000;margin:6px 0;"></div><div style="font-weight:bold;font-size:11px;">SALES BY BRANCH</div>${brList.map(b => `<div style="display:flex;justify-content:space-between;font-size:11px;"><span>${escapeHtml(b.branchName)} (${b.orders})</span><span>${c}${b.sales.toFixed(2)}</span></div>`).join('')}` : ''}
+    ${pmList.length ? `<div style="border-bottom:1px dashed #000;margin:6px 0;"></div><div style="font-weight:bold;font-size:11px;">PAYMENT METHODS</div>${pmList.map(p => `<div style="display:flex;justify-content:space-between;font-size:11px;"><span>${escapeHtml(p.method)} (${p.orders})</span><span>${c}${p.sales.toFixed(2)}</span></div>`).join('')}` : ''}
+    ${r.topItems.length ? `<div style="border-bottom:1px dashed #000;margin:6px 0;"></div><div style="font-weight:bold;font-size:11px;">TOP SELLING ITEMS</div>${r.topItems.slice(0, 20).map(i => `<div style="display:flex;justify-content:space-between;font-size:11px;"><span>${i.quantity}x ${escapeHtml(i.name)}</span><span>${c}${i.sales.toFixed(2)}</span></div>`).join('')}` : ''}
+    ${refList.length ? `<div style="border-bottom:1px dashed #000;margin:6px 0;"></div><div style="font-weight:bold;font-size:11px;">REFUNDS &amp; VOIDS (${refList.length})</div>${refList.map(rf => `<div style="font-size:10px;margin-bottom:3px;"><div style="display:flex;justify-content:space-between;"><strong>${escapeHtml(rf.orderNumber)} (${escapeHtml(rf.action)})</strong><span>${c}${Number(rf.amount || 0).toFixed(2)}</span></div><div>${escapeHtml(rf.details)}</div></div>`).join('')}` : ''}
+    <div style="border-bottom:1px dashed #000;margin:6px 0;"></div>
+    <div style="text-align:center;font-size:10px;">Generated: ${new Date().toLocaleString()}</div>`;
+}
+
+function printSalesReport() {
+  const r = window._lastSalesReport;
+  if (!r) return toast('Generate a sales report first.', 'warning');
+  printHtmlDocument(`Sales Report (${r.range.start || 'All'} - ${r.range.end || 'All'})`, buildSalesReportPrintHtml(r));
 }
 
 /* ============================================================
-   END OF DAY Z-READING REPORT, CASH DRAWER & POS CLOSE
+   END OF DAY Z-READING (WITH FULL TRANSACTION & REFUND LOGS)
    ============================================================ */
-function buildEODReceiptHtml(r) {
+function buildEodZReadingHtml(r) {
   const c = r.currency || curr();
-  const fmt = n => `${c}${Number(n || 0).toFixed(2)}`;
-  const row = (l, v, bold) => `<div style="display:flex; justify-content:space-between; margin:2px 0;${bold ? ' font-weight:bold;' : ''}"><span>${l}</span><span>${v}</span></div>`;
-  const cd = r.cashDrawer || {};
-  const hasActual = cd.actualCash !== null && cd.actualCash !== undefined;
-  const varianceVal = hasActual ? Number(cd.variance || 0) : 0;
-  const varianceLabel = !hasActual
-    ? 'Not Counted'
-    : (Math.abs(varianceVal) < 0.005
-      ? `${fmt(0)} (BALANCED)`
-      : (varianceVal > 0 ? `+${fmt(varianceVal)} (OVER)` : `-${fmt(Math.abs(varianceVal))} (SHORT)`));
-  const varianceColor = !hasActual ? '#64748b' : (Math.abs(varianceVal) < 0.005 ? '#16a34a' : (varianceVal > 0 ? '#0284c7' : '#dc2626'));
+  const row = (l, v, b) => `<div style="display:flex;justify-content:space-between;${b ? 'font-weight:bold;' : ''}"><span>${l}</span><span>${v}</span></div>`;
+  const cd = r.cashDrawer || {
+    openingFloat: 0,
+    cashSales: 0,
+    cashTendered: 0,
+    changeGiven: r.totalChange || 0,
+    expectedCash: 0,
+    actualCash: null,
+    variance: null
+  };
+
+  let varianceBlock = '';
+  if (cd.actualCash !== null && cd.actualCash !== undefined) {
+    const v = Number(cd.variance || 0);
+    const label = Math.abs(v) < 0.005 ? 'BALANCED (EXACT)' : (v > 0 ? 'CASH OVER (+)' : 'CASH SHORT (-)');
+    const color = Math.abs(v) < 0.005 ? '#15803d' : (v > 0 ? '#1d4ed8' : '#b91c1c');
+    const sign = v > 0 ? '+' : (v < 0 ? '-' : '');
+    varianceBlock = `
+      ${row('Actual Cash Counted:', `${c}${Number(cd.actualCash).toFixed(2)}`, true)}
+      <div style="display:flex;justify-content:space-between;font-weight:bold;color:${color};margin-top:2px;">
+        <span>${label}:</span>
+        <span>${sign}${c}${Math.abs(v).toFixed(2)}</span>
+      </div>`;
+  } else {
+    varianceBlock = `<div style="font-size:10px;color:#555;font-style:italic;">Actual cash counted not entered.</div>`;
+  }
+
+  const refLogs = r.refundLogs || [];
+  const txLogs = r.transactionLogs || [];
+  const actEvents = r.activityEvents || [];
 
   return `
-    <div style="text-align:center; font-weight:bold; font-size:1.12rem;">${escapeHtml(r.restaurantName || 'Tuna Choice POS')}</div>
-    <div style="text-align:center; font-size:0.82rem; font-weight:bold;">${escapeHtml(r.branchName || '')}</div>
-    ${r.branchAddress ? `<div style="text-align:center; font-size:0.75rem;">${escapeHtml(r.branchAddress)}</div>` : ''}
-    <div style="border-bottom:2px solid #000; margin:6px 0;"></div>
-    <div style="text-align:center; font-weight:bold; font-size:0.98rem;">END OF DAY Z-READING</div>
-    <div style="text-align:center; font-size:0.78rem;">Report #: ${escapeHtml(r.reportNo || '')}</div>
-    <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    <div style="font-size:0.78rem;">
+    <div style="text-align:center;font-weight:bold;font-size:15px;">${escapeHtml(r.restaurantName || 'Tuna Choice POS')}</div>
+    <div style="text-align:center;font-size:11px;font-weight:bold;">${escapeHtml(r.branchName || 'Main Branch')}</div>
+    ${r.branchAddress ? `<div style="text-align:center;font-size:10px;">${escapeHtml(r.branchAddress)}</div>` : ''}
+    <div style="text-align:center;font-weight:bold;font-size:13px;margin-top:4px;">*** Z-READING REPORT ***</div>
+    <div style="border-bottom:1px dashed #000;margin:6px 0;"></div>
+    <div style="font-size:11px;">
+      ${row('Z-Report #:', escapeHtml(r.reportNo || 'Z-0000'))}
       ${row('Business Date:', escapeHtml(r.date))}
       ${row('Printed At:', escapeHtml(r.printedAt || new Date().toLocaleString()))}
-      ${row('Generated By:', escapeHtml(r.generatedBy || 'Admin'))}
+      ${row('Cashier / Admin:', escapeHtml(r.generatedBy || 'Admin'))}
     </div>
-    <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    <div style="font-size:0.8rem;">
-      <div style="font-weight:bold; margin-bottom:2px;">TRANSACTION SUMMARY</div>
-      ${row('Paid Transactions:', r.counts?.paid || 0)}
-      ${row('Cancelled / Voided:', r.counts?.cancelled || 0)}
-      ${row('Open / Unpaid Orders:', r.counts?.open || 0)}
-      ${row('Total Items Sold:', r.counts?.itemsQty || 0)}
+    <div style="border-bottom:1px dashed #000;margin:6px 0;"></div>
+    <div style="font-size:11px;font-weight:bold;margin-bottom:3px;">TRANSACTION COUNTS</div>
+    <div style="font-size:11px;">
+      ${row('Paid Orders:', r.counts.paid)}
+      ${row('Cancelled / Voided:', r.counts.cancelled)}
+      ${row('Refund / Edit Events:', r.counts.refunds || 0)}
+      ${row('Unpaid / Open Orders:', r.counts.open)}
+      ${row('Total Items Sold:', r.counts.itemsQty || 0)}
     </div>
-    <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    <div style="font-size:0.8rem;">
-      <div style="font-weight:bold; margin-bottom:2px;">SALES &amp; TAX BREAKDOWN</div>
-      ${row('Gross Sales (Subtotal):', fmt(r.totals?.subtotal))}
-      ${Number(r.totals?.lessVat || 0) > 0 ? row('Less VAT (SC/PWD):', '-' + fmt(r.totals?.lessVat)) : ''}
-      ${row('Total Discounts:', '-' + fmt(r.totals?.discount))}
-      ${Number(r.totals?.serviceCharge || 0) > 0 ? row('Service Charge:', fmt(r.totals?.serviceCharge)) : ''}
-      ${row('VATable Sales:', fmt(r.totals?.vatableSales))}
-      ${row('VAT-Exempt Sales:', fmt(r.totals?.vatExemptSales))}
-      ${row('VAT Amount:', fmt(r.totals?.tax))}
-      <div style="border-top:1px solid #000; margin-top:4px; padding-top:4px; font-size:0.95rem;">
-        ${row('NET TOTAL SALES:', fmt(r.totals?.sales), true)}
+    <div style="border-bottom:1px dashed #000;margin:6px 0;"></div>
+    <div style="font-size:11px;font-weight:bold;margin-bottom:3px;">SALES &amp; VAT BREAKDOWN</div>
+    <div style="font-size:11px;">
+      ${row('Gross Sales (Subtotal):', `${c}${Number(r.totals.subtotal || 0).toFixed(2)}`)}
+      ${row('Less: VAT-Exempt:', `-${c}${Number(r.totals.lessVat || 0).toFixed(2)}`)}
+      ${row('Discounts (SC/PWD/Promo):', `-${c}${Number(r.totals.discount || 0).toFixed(2)}`)}
+      ${row('Refunds / Voids Total:', `${c}${Number(r.totals.refunded || 0).toFixed(2)}`)}
+      ${row('Service Charge:', `${c}${Number(r.totals.serviceCharge || 0).toFixed(2)}`)}
+      <div style="border-top:1px solid #000;margin:4px 0;padding-top:4px;font-size:13px;">
+        ${row('NET TOTAL SALES:', `${c}${Number(r.totals.sales || 0).toFixed(2)}`, true)}
+      </div>
+      ${row('VATable Sales:', `${c}${Number(r.totals.vatableSales || 0).toFixed(2)}`)}
+      ${row('VAT-Exempt Sales:', `${c}${Number(r.totals.vatExemptSales || 0).toFixed(2)}`)}
+      ${row('VAT Amount:', `${c}${Number(r.totals.tax || 0).toFixed(2)}`)}
+    </div>
+    <div style="border-bottom:1px dashed #000;margin:6px 0;"></div>
+    <div style="font-size:11px;font-weight:bold;margin-bottom:3px;">PAYMENT METHOD BREAKDOWN</div>
+    <div style="font-size:11px;">
+      ${(r.paymentBreakdown || []).length
+        ? r.paymentBreakdown.map(p => row(`${escapeHtml(p.method)} (${p.count}):`, `${c}${Number(p.total || 0).toFixed(2)}`)).join('')
+        : '<div>No payments recorded.</div>'}
+    </div>
+    <div style="border-bottom:1px dashed #000;margin:6px 0;"></div>
+    <div style="font-size:11px;font-weight:bold;margin-bottom:3px;">CASH DRAWER RECONCILIATION</div>
+    <div style="font-size:11px;">
+      ${row('Opening Cash Float:', `${c}${Number(cd.openingFloat || 0).toFixed(2)}`)}
+      ${row('(+) Cash Sales:', `${c}${Number(cd.cashSales || 0).toFixed(2)}`)}
+      <div style="border-top:1px dashed #000;margin:3px 0;padding-top:3px;">
+        ${row('Expected Cash in Drawer:', `${c}${Number(cd.expectedCash || 0).toFixed(2)}`, true)}
+      </div>
+      ${varianceBlock}
+      <div style="border-top:1px dotted #999;margin-top:4px;padding-top:3px;font-size:10px;color:#444;">
+        ${row('Total Tendered (All):', `${c}${Number(r.totalCollected || 0).toFixed(2)}`)}
+        ${row('Total Change Given:', `${c}${Number(r.totalChange || 0).toFixed(2)}`)}
       </div>
     </div>
-    <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    <div style="font-size:0.8rem;">
-      <div style="font-weight:bold; margin-bottom:2px;">TENDER / PAYMENT BREAKDOWN</div>
-      ${(r.paymentBreakdown || []).map(p => row(`${escapeHtml(p.method)} (${p.count})`, fmt(p.total))).join('') || '<div style="color:#666;">No paid transactions</div>'}
-      <div style="border-top:1px dashed #999; margin-top:4px; padding-top:3px;">
-        ${row('Total Amount Tendered:', fmt(r.totalCollected))}
-        ${row('Total Change Given:', fmt(r.totalChange))}
-      </div>
-    </div>
-    <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    <div style="font-size:0.8rem;">
-      <div style="font-weight:bold; margin-bottom:2px;">CASH DRAWER RECONCILIATION</div>
-      ${row('Opening Cash Float:', fmt(cd.openingFloat))}
-      ${row('(+) Cash Sales:', fmt(cd.cashSales))}
-      ${row('Expected Cash in Drawer:', fmt(cd.expectedCash), true)}
-      ${row('Actual Cash Counted:', hasActual ? fmt(cd.actualCash) : '—')}
-      <div style="display:flex; justify-content:space-between; margin:3px 0; font-weight:bold; color:${varianceColor};">
-        <span>Over / (Short) Variance:</span>
-        <span>${varianceLabel}</span>
-      </div>
-    </div>
-    <div style="border-bottom:1px dashed #000; margin:6px 0;"></div>
-    <div style="font-size:0.78rem;">
-      <div style="font-weight:bold; margin-bottom:2px;">ITEMS SOLD SUMMARY</div>
-      ${(r.itemsSold || []).map(i => row(`${i.quantity}x ${escapeHtml(i.name)}`, fmt(i.total))).join('') || '<div style="color:#666;">None</div>'}
-    </div>
-    <div style="border-bottom:2px solid #000; margin:8px 0;"></div>
-    <div style="text-align:center; font-size:0.75rem;">*** END OF Z-READING REPORT ***</div>`;
+    ${(r.itemsSold || []).length ? `
+      <div style="border-bottom:1px dashed #000;margin:6px 0;"></div>
+      <div style="font-size:11px;font-weight:bold;margin-bottom:3px;">ITEMS SOLD SUMMARY</div>
+      <div style="font-size:11px;">
+        ${r.itemsSold.map(i => row(`${i.quantity}x ${escapeHtml(i.name)}`, `${c}${Number(i.total || 0).toFixed(2)}`)).join('')}
+      </div>` : ''}
+    ${refLogs.length ? `
+      <div style="border-bottom:1px dashed #000;margin:6px 0;"></div>
+      <div style="font-size:11px;font-weight:bold;margin-bottom:3px;">EDIT ORDER / ITEM REFUNDS &amp; VOIDS (${refLogs.length})</div>
+      <div style="font-size:10px;">
+        ${refLogs.map(rf => `
+          <div style="margin-bottom:4px;border-bottom:1px dotted #ccc;padding-bottom:2px;">
+            ${row(`${escapeHtml(rf.time)} ${escapeHtml(rf.orderNumber)} [${escapeHtml(rf.action)}]`, `${c}${Number(rf.amount || 0).toFixed(2)}`, true)}
+            <div>${escapeHtml(rf.details)}</div>
+          </div>`).join('')}
+      </div>` : ''}
+    ${txLogs.length ? `
+      <div style="border-bottom:1px dashed #000;margin:6px 0;"></div>
+      <div style="font-size:11px;font-weight:bold;margin-bottom:3px;">TRANSACTION LOG (${txLogs.length} ORDERS)</div>
+      <div style="font-size:10px;">
+        ${txLogs.map(tx => `
+          <div style="margin-bottom:3px;">
+            ${row(`${escapeHtml(tx.time)} ${escapeHtml(tx.orderNumber)} (${escapeHtml(tx.table)})`, `${c}${Number(tx.total || 0).toFixed(2)}`, tx.paymentStatus === 'PAID')}
+            <div style="color:#444;">${escapeHtml(tx.method)} | ${escapeHtml(tx.status)} | ${escapeHtml(tx.staff)}</div>
+          </div>`).join('')}
+      </div>` : ''}
+    ${actEvents.length ? `
+      <div style="border-bottom:1px dashed #000;margin:6px 0;"></div>
+      <div style="font-size:11px;font-weight:bold;margin-bottom:3px;">SYSTEM AUDIT TRAIL (${actEvents.length})</div>
+      <div style="font-size:10px;">
+        ${actEvents.map(ev => `<div style="margin-bottom:2px;"><strong>${escapeHtml(ev.time)} [${escapeHtml(ev.action)}]</strong> ${escapeHtml(ev.user)}: ${escapeHtml(ev.details)}</div>`).join('')}
+      </div>` : ''}
+    <div style="border-bottom:1px dashed #000;margin:8px 0;"></div>
+    <div style="text-align:center;font-size:11px;font-weight:bold;">END OF Z-READING REPORT</div>`;
 }
 
 function renderEODReportHtml(r) {
   const c = r.currency || curr();
-  const fmt = n => `${c}${Number(n || 0).toFixed(2)}`;
-  const cd = r.cashDrawer || {};
-  const hasActual = cd.actualCash !== null && cd.actualCash !== undefined;
-  const varianceVal = hasActual ? Number(cd.variance || 0) : 0;
-  const varianceBadge = !hasActual
-    ? '<span class="badge bg-secondary">Enter Actual Cash above to check variance</span>'
-    : (Math.abs(varianceVal) < 0.005
-      ? `<span class="badge bg-success">${fmt(0)} — BALANCED</span>`
-      : (varianceVal > 0
-        ? `<span class="badge bg-info text-dark">+${fmt(varianceVal)} — OVER</span>`
-        : `<span class="badge bg-danger">-${fmt(Math.abs(varianceVal))} — SHORT</span>`));
-
+  const zReceiptHtml = buildEodZReadingHtml(r);
   const openBadge = $('eodOpenWarningBadge');
   if (openBadge) {
-    if ((r.counts?.open || 0) > 0) {
+    if (r.counts.open > 0) {
       openBadge.style.display = 'inline-block';
-      openBadge.textContent = `${r.counts.open} Open Order(s) Remaining`;
+      openBadge.textContent = `${r.counts.open} Open Order(s)`;
     } else {
       openBadge.style.display = 'none';
     }
   }
 
+  const refLogs = r.refundLogs || [];
+  const txLogs = r.transactionLogs || [];
+
   $('eodReport').innerHTML = `
     <div class="row g-3 align-items-start">
-      <div class="col-lg-5">
-        <div class="receipt-preview shadow-sm" id="eodThermalPreviewBox">
-          ${buildEODReceiptHtml(r)}
-        </div>
+      <div class="col-md-5">
+        <div class="receipt-preview shadow-sm">${zReceiptHtml}</div>
       </div>
-      <div class="col-lg-7">
-        <div class="row g-2 mb-3">
-          <div class="col-6 col-md-4"><div class="stat-card bg-primary"><h6>Net Sales</h6><h4>${fmt(r.totals?.sales)}</h4></div></div>
-          <div class="col-6 col-md-4"><div class="stat-card bg-success"><h6>Paid Orders</h6><h4>${r.counts?.paid || 0}</h4></div></div>
-          <div class="col-6 col-md-4"><div class="stat-card bg-info"><h6>Items Sold</h6><h4>${r.counts?.itemsQty || 0}</h4></div></div>
+      <div class="col-md-7">
+        <div class="alert ${r.counts.open > 0 ? 'alert-warning' : 'alert-success'} mb-3">
+          <div class="fw-bold mb-1">
+            <i class="fa-solid ${r.counts.open > 0 ? 'fa-triangle-exclamation' : 'fa-circle-check'} me-1"></i>
+            Z-Reading Ready for ${escapeHtml(r.date)} (${escapeHtml(r.branchName)})
+          </div>
+          <div class="small">
+            ${r.counts.open > 0
+              ? `Warning: There are still <strong>${r.counts.open}</strong> unpaid/open order(s) for this date.`
+              : `All orders for this business date are settled. Click <strong>Print Z-Reading</strong> or <strong>Close POS</strong> to archive this closing.`}
+          </div>
         </div>
 
-        <div class="card border mb-3">
-          <div class="card-header bg-light fw-bold d-flex justify-content-between align-items-center">
-            <span><i class="fa-solid fa-cash-register text-success me-2"></i>Cash Drawer Reconciliation</span>
-            ${varianceBadge}
-          </div>
-          <div class="card-body p-2">
-            <table class="table table-sm mb-0">
+        <div class="card border p-3 mb-3">
+          <h6 class="fw-bold mb-2"><i class="fa-solid fa-wallet text-primary me-1"></i>Payment Method Breakdown (Hybrid Separated)</h6>
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered mb-0">
+              <thead class="table-light"><tr><th>Method</th><th class="text-end">Count</th><th class="text-end">Total</th></tr></thead>
               <tbody>
-                <tr><td>Opening Cash Float</td><td class="text-end fw-semibold">${fmt(cd.openingFloat)}</td></tr>
-                <tr><td>(+) Cash Sales</td><td class="text-end fw-semibold text-success">${fmt(cd.cashSales)}</td></tr>
-                <tr class="table-light"><td><strong>Expected Cash in Drawer</strong></td><td class="text-end fw-bold">${fmt(cd.expectedCash)}</td></tr>
-                <tr><td>Actual Cash Counted</td><td class="text-end fw-semibold">${hasActual ? fmt(cd.actualCash) : '<span class="text-muted">Not entered</span>'}</td></tr>
+                ${(r.paymentBreakdown || []).length
+                  ? r.paymentBreakdown.map(p => `<tr><td><strong>${escapeHtml(p.method)}</strong></td><td class="text-end">${p.count}</td><td class="text-end fw-bold">${c}${Number(p.total || 0).toFixed(2)}</td></tr>`).join('')
+                  : '<tr><td colspan="3" class="text-center text-muted">No payments recorded</td></tr>'}
               </tbody>
             </table>
           </div>
         </div>
 
-        <div class="card border mb-3">
-          <div class="card-header bg-light fw-bold"><i class="fa-solid fa-wallet text-primary me-2"></i>Tender Breakdown</div>
-          <div class="card-body p-2">
-            <table class="table table-sm mb-0">
-              <thead><tr><th>Payment Method</th><th class="text-end">Orders</th><th class="text-end">Total</th></tr></thead>
+        <div class="card border border-danger p-3 mb-3">
+          <h6 class="fw-bold text-danger mb-2"><i class="fa-solid fa-rotate-left me-1"></i>Edit Order / Item Refunds &amp; Voids Log (${refLogs.length})</h6>
+          <div class="table-responsive" style="max-height:220px;">
+            <table class="table table-sm table-bordered mb-0">
+              <thead class="table-danger"><tr><th>Time</th><th>Order #</th><th>Action</th><th class="text-end">Amount</th><th>Details</th></tr></thead>
               <tbody>
-                ${(r.paymentBreakdown || []).map(p => `<tr><td>${escapeHtml(p.method)}</td><td class="text-end">${p.count}</td><td class="text-end fw-bold">${fmt(p.total)}</td></tr>`).join('') || '<tr><td colspan="3" class="text-muted text-center">No paid transactions for this date.</td></tr>'}
+                ${refLogs.length
+                  ? refLogs.map(rf => `<tr><td class="small">${escapeHtml(rf.time)}</td><td><strong>${escapeHtml(rf.orderNumber)}</strong></td><td><span class="badge bg-danger">${escapeHtml(rf.action)}</span></td><td class="text-end text-danger fw-bold">${c}${Number(rf.amount || 0).toFixed(2)}</td><td class="small">${escapeHtml(rf.details)}</td></tr>`).join('')
+                  : '<tr><td colspan="5" class="text-center text-muted small">No order edits, item refunds, or voids on this date.</td></tr>'}
               </tbody>
             </table>
           </div>
         </div>
 
-        <div class="card border">
-          <div class="card-header bg-light fw-bold"><i class="fa-solid fa-utensils text-warning me-2"></i>Items Sold (${(r.itemsSold || []).length} menu items)</div>
-          <div class="card-body p-2" style="max-height:240px; overflow:auto;">
-            <table class="table table-sm mb-0">
-              <thead><tr><th>Item</th><th class="text-end">Qty</th><th class="text-end">Total</th></tr></thead>
+        <div class="card border p-3">
+          <h6 class="fw-bold mb-2"><i class="fa-solid fa-list-ul text-secondary me-1"></i>Full Transaction Log (${txLogs.length} Orders)</h6>
+          <div class="table-responsive" style="max-height:260px;">
+            <table class="table table-sm table-bordered mb-0">
+              <thead class="table-light"><tr><th>Time</th><th>Order #</th><th>Table</th><th>Method</th><th>Status</th><th class="text-end">Total</th></tr></thead>
               <tbody>
-                ${(r.itemsSold || []).map(i => `<tr><td>${escapeHtml(i.name)}</td><td class="text-end">${i.quantity}</td><td class="text-end">${fmt(i.total)}</td></tr>`).join('') || '<tr><td colspan="3" class="text-muted text-center">No items sold.</td></tr>'}
+                ${txLogs.length
+                  ? txLogs.map(tx => `<tr><td class="small">${escapeHtml(tx.time)}</td><td><strong>${escapeHtml(tx.orderNumber)}</strong></td><td>${escapeHtml(tx.table)}</td><td class="small">${escapeHtml(tx.method)}</td><td>${badgeForStatus(tx.status)}</td><td class="text-end fw-bold">${c}${Number(tx.total || 0).toFixed(2)}</td></tr>`).join('')
+                  : '<tr><td colspan="6" class="text-center text-muted small">No transactions recorded on this date.</td></tr>'}
               </tbody>
             </table>
           </div>
@@ -3477,25 +4374,28 @@ function renderEODReportHtml(r) {
 }
 
 async function loadEODReport() {
-  try {
-    const dateVal = $('eodDate').value || todayStr();
-    saveEodDrawerValues();
-    const openingFloat = getEodOpeningFloat();
-    const actualCash = getEodActualCash();
+  const dateVal = $('eodDate').value;
+  if (!dateVal) return toast('Select a date first.', 'warning');
+  saveEodDrawerValues();
+  const openingFloat = getEodOpeningFloat();
+  const actualCash = getEodActualCash();
 
-    showLoading('Generating End of Day Z-Reading…');
+  try {
+    showLoading('Generating Z-Reading report…');
     const r = await callServer('getEndOfDayReport', state.token, dateVal, openingFloat, actualCash);
-    window._lastEOD = r;
-    state.eodGenerated = dateVal;
-    renderEODReportHtml(r);
-    await loadEodHistory();
     hideLoading();
+    window._lastEOD = r;
+    state.eodGenerated = { date: dateVal, branchId: state.activeBranchId };
+    renderEODReportHtml(r);
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
 function printEODReport() {
-  if (!window._lastEOD) return toast('Generate the Z-Reading report first.', 'warning');
-  printHtmlDocument(`Z-Reading ${window._lastEOD.date}`, buildEODReceiptHtml(window._lastEOD));
+  const r = window._lastEOD;
+  if (!r || !state.eodGenerated || state.eodGenerated.date !== $('eodDate').value) {
+    return toast('Generate the Z-Reading report first before printing.', 'warning');
+  }
+  printHtmlDocument(`Z-Reading Report - ${r.date}`, buildEodZReadingHtml(r));
 }
 
 async function loadEodHistory() {
@@ -3503,38 +4403,38 @@ async function loadEodHistory() {
   if (!tbody) return;
   try {
     const rows = await callServer('getEodHistory', state.token);
-    const c = curr(), fmt = n => `${c}${Number(n || 0).toFixed(2)}`;
-    if (!rows || !rows.length) {
-      tbody.innerHTML = '<tr><td colspan="7" class="text-muted small text-center py-2">No Z-Reading closings recorded for this branch yet.</td></tr>';
+    const c = curr();
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted small py-2">No closed Z-Readings archived yet for this branch.</td></tr>';
       return;
     }
-    tbody.innerHTML = rows.map(r => `<tr>
-      <td><strong>${escapeHtml(r.BusinessDate || '')}</strong></td>
-      <td class="small text-muted">${r.CreatedAt ? new Date(r.CreatedAt).toLocaleString() : '—'}</td>
-      <td class="text-end fw-bold text-primary">${fmt(r.CashSales)}</td>
-      <td class="text-end text-danger">-${fmt(r.SeniorPwdDiscounts)}</td>
-      <td class="text-end">${fmt(r.VatableSales)}</td>
-      <td class="text-end">${fmt(r.VatExemptSales)}</td>
-      <td class="text-end">${fmt(r.VatAmount)}</td>
-    </tr>`).join('');
-  } catch (e) {
-    tbody.innerHTML = '<tr><td colspan="7" class="text-muted small text-center py-2">Unable to load Z-Reading history.</td></tr>';
+    tbody.innerHTML = rows.map(r => `
+      <tr>
+        <td><strong>${escapeHtml(r.BusinessDate)}</strong></td>
+        <td class="small text-muted">${r.ClosedAt ? new Date(r.ClosedAt).toLocaleString() : '—'}</td>
+        <td class="text-end fw-bold text-success">${c}${Number(r.CashSales || 0).toFixed(2)}</td>
+        <td class="text-end text-danger">-${c}${Number(r.SeniorPwdDiscounts || 0).toFixed(2)}</td>
+        <td class="text-end">${c}${Number(r.VatableSales || 0).toFixed(2)}</td>
+        <td class="text-end">${c}${Number(r.VatExemptSales || 0).toFixed(2)}</td>
+        <td class="text-end">${c}${Number(r.VatAmount || 0).toFixed(2)}</td>
+      </tr>`).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger small py-2">${escapeHtml(err.message)}</td></tr>`;
   }
 }
 
 async function closePOS() {
-  const dateVal = $('eodDate').value || todayStr();
-  if (state.eodGenerated !== dateVal || !window._lastEOD) {
-    showModal('eodRequiredModal');
-    return;
+  const dateVal = $('eodDate').value;
+  if (!dateVal) return toast('Select a date first.', 'warning');
+  if (!state.eodGenerated || state.eodGenerated.date !== dateVal || state.eodGenerated.branchId !== state.activeBranchId) {
+    return showModal('eodRequiredModal');
   }
-  const openCount = window._lastEOD.counts?.open || 0;
-  const warnText = openCount > 0 ? `\n\nWARNING: There are still ${openCount} open/unpaid order(s) today.` : '';
-  if (!confirm(`Close POS for ${dateVal}?${warnText}\n\nThis will archive the Z-Reading report and reset all branch tables to Available.`)) return;
+  if (!confirm(`Close POS for ${dateVal} on the current branch?\n\nThis will archive the Z-Reading report, mark paid orders as COMPLETED, and reset all branch tables to Available.`)) return;
   try {
     showLoading('Closing POS & archiving Z-Reading…');
-    const res = await callServer('archiveAndResetPOS', state.token, dateVal);
-    showDone(res.message, async () => {
+    const r = await callServer('archiveAndResetPOS', state.token, dateVal);
+    showDone(r.message || 'POS Closed & Z-Reading Archived!', async () => {
+      state.eodGenerated = null;
       await loadEodHistory();
       await poll(true);
     });
@@ -3543,44 +4443,32 @@ async function closePOS() {
 
 async function downloadZipBackup() {
   try {
-    showLoading('Exporting branch backup…');
+    showLoading('Preparing branch backup…');
     const res = await callServer('exportDatabaseAsZip', state.token);
     hideLoading();
-    if (res && res.base64Data) {
-      const a = document.createElement('a');
-      a.href = 'data:application/json;base64,' + res.base64Data;
-      a.download = res.fileName;
-      a.click();
-      toast('Backup exported!', 'success');
-    }
+    const a = document.createElement('a'); a.href = 'data:application/json;base64,' + res.base64Data; a.download = res.fileName;
+    document.body.appendChild(a); a.click(); a.remove(); toast('Backup downloaded!', 'success');
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
+}
+
+async function triggerDbSetup() {
+  if (!confirm('Reload branch data from Supabase?')) return;
+  try { showLoading('Reloading…'); await loadBootstrap(); await poll(true); showDone('Database synced!'); }
+  catch (err) { hideLoading(); toast(err.message, 'danger'); }
 }
 
 function openHelpModal() { showModal('helpModal'); }
-function printSystemHelpGuide() {
-  printHtmlDocument('System Operations Guide', '<div style="text-align:center;font-weight:bold;">Tuna Choice POS GUIDE</div><div>All screens update instantaneously via Supabase Realtime.</div>');
-}
-function openChangePasswordModal() { $('cpOldPw').value = ''; $('cpNewPw').value = ''; $('cpNewPw2').value = ''; showModal('changePwModal'); }
-async function submitChangePassword() {
-  if ($('cpNewPw').value !== $('cpNewPw2').value) return toast('Passwords do not match', 'warning');
-  try {
-    showLoading('Updating…');
-    const r = await callServer('changePassword', state.token, $('cpOldPw').value, $('cpNewPw').value);
-    if (!r.success) throw new Error(r.message);
-    showDone('Password changed!', () => hideModal('changePwModal'));
-  } catch (err) { hideLoading(); toast(err.message, 'danger'); }
-}
-
-function triggerDbSetup() {
-  toast('Database schema is managed in Supabase SQL Editor.', 'info');
-}
 
 /* ============================================================
-   BOOT SEQUENCE
+   INITIALIZATION
    ============================================================ */
-(async function boot() {
-  $('loginVersion').textContent = APP_VERSION;
+(async function init() {
+  if ($('loginVersion')) $('loginVersion').textContent = APP_VERSION;
   try {
-    if (await resumeSession()) await initSession();
+    if (await resumeSession()) {
+      await initSession();
+      return;
+    }
   } catch (e) {}
+  $('loginScreen').style.display = 'flex';
 })();
