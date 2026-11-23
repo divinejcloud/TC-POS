@@ -49,7 +49,13 @@
     </form>
     <div class="border-top mt-3 pt-2 text-center">
       <div class="text-muted small">&copy; Jorish Mark Fernandez</div>
-      <div class="text-muted" style="font-size: 0.72rem;" id="loginVersion"></div>
+      <div class="d-flex justify-content-center align-items-center gap-2 mt-1">
+        <span class="text-muted" style="font-size: 0.72rem;" id="loginVersion"></span>
+        <span class="text-muted" style="font-size: 0.72rem;">&bull;</span>
+        <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none text-muted" style="font-size: 0.72rem;" onclick="openDbConfigModal()">
+          <i class="fa-solid fa-database me-1"></i>DB Setup
+        </button>
+      </div>
     </div>
   </div>
 </div>
