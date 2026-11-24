@@ -1264,13 +1264,40 @@
         </div>
       </div>
       <div class="modal-body">
-        <h6 class="fw-bold text-primary mb-2">User Roles &amp; Screens</h6>
-        <ul class="small text-muted">
-          <li><strong>Dashboard:</strong> Manage table status, reservations, table transfers/merges, and new dine-in/takeout orders.</li>
-          <li><strong>Counter:</strong> Settle orders (Single, Hybrid Split Cash + E-Wallet/Card, or Delivery), apply discounts (Manager/Admin PIN required for manual discounts), and process refunds (Manager/Admin PIN required).</li>
-          <li><strong>Kitchen (KDS):</strong> Accept confirmed orders, set preparation ETA, and mark orders Ready to Serve.</li>
-          <li><strong>Admin Setting:</strong> Configure restaurant settings, branches, menu items, users &amp; Manager/Admin PINs, sales reports, and End-of-Day Z-Reading.</li>
+        <div class="alert alert-light border small mb-3">
+          <strong>Tuna Choice POS</strong> supports real-time synchronization across Dashboard, Counter, Kitchen (KDS), and Admin Setting modules, multi-branch operations, Philippine VAT &amp; Senior/PWD discount rules, Manager/Admin PIN approvals, and offline queuing.
+        </div>
+
+        <h6 class="fw-bold text-primary mb-2"><i class="fa-solid fa-users-gear me-1"></i>1. User Roles &amp; Screens</h6>
+        <ul class="small text-muted mb-3">
+          <li><strong>Dashboard:</strong> View and manage table availability, reservations, reservation transfers, order transfers between tables, merging active table orders, serving checklists, and creating new orders.</li>
+          <li><strong>Counter:</strong> Settle orders via Single Payment, Hybrid Split (Cash + GCash/Maya/Card/Other), or Delivery (Food Panda, GrabFood, Maxim, Others); apply Senior/PWD or manual discounts; reprint receipts; print kitchen tickets; and edit/refund items or void orders (Manager/Admin PIN required).</li>
+          <li><strong>Kitchen (KDS):</strong> View incoming counter-confirmed orders, accept tickets, set preparation ETA minutes, start prep, mark orders Ready to Serve, and print kitchen tickets.</li>
+          <li><strong>Admin Setting:</strong> Configure branch settings, manage branches (Admin), manage menu items/categories/tables/users &amp; Manager/Admin PINs, inspect activity logs (Admin), generate sales reports, and run End of Day Z-Reading &amp; Close POS.</li>
         </ul>
+
+        <h6 class="fw-bold text-primary mb-2"><i class="fa-solid fa-gears me-1"></i>2. Core POS Functions &amp; Workflows</h6>
+        <ul class="small text-muted mb-3">
+          <li><strong>New Order &amp; Basket:</strong> Filter items by category or search keyword, add/adjust item quantities in the basket, choose a table or Takeout/Walk-In, and submit. Orders start as <code>PENDING_COUNTER</code> (works offline and syncs automatically when reconnected).</li>
+          <li><strong>Table Reservations, Transfers &amp; Merges:</strong> Tap an Available table to reserve it for a guest/time, or tap a Reserved table to update notes, release it, or transfer the reservation to another available table. Use <em>Transfer</em> on an active order to move it to an open table, or <em>Merge Tables</em> to combine items and bills from a source table into a target table.</li>
+          <li><strong>Payments, Discounts &amp; VAT Calculation:</strong> Supports Single Payment (Cash, GCash, Maya, Card, Other), Hybrid Split (Cash + second method with reference # and automatic change calculation), and Delivery orders. Toggling <strong>Senior Citizen / PWD</strong> applies the configured discount % and VAT exemption (requiring ID #), while manual discounts require a <strong>Manager / Admin PIN</strong>.</li>
+          <li><strong>Serve Checklist &amp; Kitchen Flow:</strong> When KDS is enabled, orders move through <em>Confirmed by Counter &rarr; Accepted by Kitchen &rarr; Preparing (with live ETA countdown) &rarr; Ready</em>. Staff use the <strong>Serve Order Checklist</strong> to record served quantities per item—partial serves keep the order in <code>PREPARING</code> until all quantities are served (<code>SERVED</code>). When KDS is disabled in Settings, paid orders go straight to Ready/Serve.</li>
+          <li><strong>Item Refunds, Order Voids &amp; PIN Security:</strong> Managers and Admins can open <strong>Edit / Refund</strong> from the Counter Order List to refund partial/full item quantities or void an entire order with a mandatory reason and Manager/Admin PIN. For paid Hybrid orders, you can choose whether to refund from Cash, the second payment method, or split across both.</li>
+          <li><strong>Multi-Branch, CSV &amp; Database Tools:</strong> Admins can switch active branches from the top bar and add branches (which automatically copy Main Branch settings, menu items, and tables). Menu items and categories support CSV export/import; Admins also have backup, restore, and database reset controls under Settings.</li>
+        </ul>
+
+        <h6 class="fw-bold text-primary mb-2"><i class="fa-solid fa-chart-column me-1"></i>3. Reports &amp; Audit Logs</h6>
+        <ul class="small text-muted mb-3">
+          <li><strong>Sales Report:</strong> Filter by date presets (Today, Last 7 Days, This Month, All Time) or custom start/end dates, and toggle Branch Scope (Consolidated vs. Current Branch for Admins). Displays Net Sales, Paid Orders, Discounts Given, Refunded/Voided totals, Senior/PWD vs. Regular discount breakdowns, VAT vs. VAT-exempt/Less-VAT breakdowns, payment method totals, top-selling items, daily sales, per-order payment splits, and the Item Refunds &amp; Voids audit log. Exportable to CSV or printable.</li>
+          <li><strong>Activity Log (Admin):</strong> Tracks timestamped actions across orders, payments, refunds, tables, menu items, settings, and users for accountability.</li>
+        </ul>
+
+        <h6 class="fw-bold text-danger mb-2"><i class="fa-solid fa-moon me-1"></i>4. End of Day Z-Reading Report &amp; Close POS</h6>
+        <ol class="small text-muted mb-0">
+          <li><strong>Enter Cash Drawer Counts:</strong> Select the <strong>Business Date</strong>, enter the <strong>Opening Cash Float</strong>, and enter the <strong>Actual Cash Counted</strong> in the drawer.</li>
+          <li><strong>Generate Z-Reading:</strong> Click <strong>Generate</strong> to compile the daily Z-Reading report containing Gross Subtotal, Less VAT, Senior/PWD and Regular discounts, VATable/VAT-Exempt sales, VAT, Service Charge, Net Total Sales, Cash Drawer reconciliation (<em>Expected Cash = Opening Cash Float + Net Cash Sales</em> and <em>Variance = Actual Cash &minus; Expected Cash</em>), payment method totals, and selling items summary. You can print the Z-Reading or review past closings in Recent Z-Reading Closings.</li>
+          <li><strong>Close POS:</strong> Click <strong>Close POS</strong> after generating the Z-Reading for that business date to archive the Z-Reading record, mark completed paid orders as <code>COMPLETED</code>, and reset branch tables to <code>Available</code> for the next business day.</li>
+        </ol>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary w-100 fw-bold" data-bs-dismiss="modal">Close Manual</button>
@@ -3253,6 +3280,13 @@ async function callServer(fnName, ...args) {
       const totalCollected = paid.reduce((s, o) => s + Number(o.AmountTendered || o.GrandTotal || 0), 0);
       const totalChange = paid.reduce((s, o) => s + Number(o.ChangeAmount || 0), 0);
 
+      const seniorDiscountTotal = paid
+        .filter(o => o.DiscountType === 'Senior/PWD' || /SC\/PWD/i.test(String(o.DiscountReason || '')))
+        .reduce((s, o) => s + Number(o.Discount || 0), 0);
+      const regularDiscountTotal = paid
+        .filter(o => o.DiscountType !== 'Senior/PWD' && !/SC\/PWD/i.test(String(o.DiscountReason || '')))
+        .reduce((s, o) => s + Number(o.Discount || 0), 0);
+
       const methodMap = {};
       const addMethodSplit = (methodLabel, amount) => {
         const amt = Number(amount || 0);
@@ -3338,6 +3372,8 @@ async function callServer(fnName, ...args) {
           subtotal: paid.reduce((s, o) => s + Number(o.Subtotal || 0), 0),
           lessVat: paid.reduce((s, o) => s + Number(o.LessVat || 0), 0),
           discount: paid.reduce((s, o) => s + Number(o.Discount || 0), 0),
+          seniorDiscount: seniorDiscountTotal,
+          regularDiscount: regularDiscountTotal,
           serviceCharge: paid.reduce((s, o) => s + Number(o.ServiceCharge || 0), 0),
           tax: paid.reduce((s, o) => s + Number(o.Tax || 0), 0),
           vatableSales: paid.reduce((s, o) => s + Number(o.VatableSales || 0), 0),
@@ -6486,7 +6522,8 @@ function renderEODReportHtml(r) {
           <table class="table table-sm table-bordered bg-white">
             <tr><td>Gross Subtotal</td><td class="text-end">${c}${r.totals.subtotal.toFixed(2)}</td></tr>
             <tr><td>Less: Senior / PWD VAT</td><td class="text-end text-danger">-${c}${Number(r.totals.lessVat || 0).toFixed(2)}</td></tr>
-            <tr><td>Discounts</td><td class="text-end text-danger">-${c}${r.totals.discount.toFixed(2)}</td></tr>
+            <tr><td>Senior Citizen / PWD Discounts</td><td class="text-end text-danger">-${c}${Number(r.totals.seniorDiscount || 0).toFixed(2)}</td></tr>
+            <tr><td>Regular / Manual Discounts</td><td class="text-end text-danger">-${c}${Number(r.totals.regularDiscount || 0).toFixed(2)}</td></tr>
             <tr><td>VATable Sales</td><td class="text-end">${c}${r.totals.vatableSales.toFixed(2)}</td></tr>
             <tr><td>VAT-Exempt Sales</td><td class="text-end">${c}${r.totals.vatExemptSales.toFixed(2)}</td></tr>
             <tr><td>VAT Amount</td><td class="text-end">${c}${r.totals.tax.toFixed(2)}</td></tr>
