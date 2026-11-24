@@ -693,10 +693,11 @@
                         <th class="text-end">VATable</th>
                         <th class="text-end">VAT-Exempt</th>
                         <th class="text-end">VAT</th>
+                        <th class="text-end">Action</th>
                       </tr>
                     </thead>
                     <tbody id="eodHistoryBody">
-                      <tr><td colspan="7" class="text-muted small text-center py-2">Click Refresh or generate Z-Reading to view past closings.</td></tr>
+                      <tr><td colspan="8" class="text-muted small text-center py-2">Click Refresh or generate Z-Reading to view past closings.</td></tr>
                     </tbody>
                   </table>
                 </div>
@@ -814,208 +815,208 @@
           <button type="button" class="btn btn-warning fw-bold flex-grow-1 py-2" onclick="submitCounterItemRefund()">
             <i class="fa-solid fa-rotate-left me-1"></i>Process Selected Item Refund
           </button>
-          <button type="button" class="btn btn-outline-danger fw-bold py-2" onclick="submitFullOrderRefund()">
-            <i class="fa-solid fa-ban me-1"></i>Full Order Refund / Void
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- FORGOT / RESET PASSWORD MODAL -->
-<div class="modal fade" id="forgotPasswordModal" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered">
+<!-- PAYMENT MODAL (IMPROVED ERGONOMIC CASHIER LAYOUT) -->
+<div class="modal fade" id="paymentModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content">
-      <div class="modal-header bg-dark text-white">
-        <h5 class="modal-title"><i class="fa-solid fa-key text-warning me-2"></i>Reset Password</h5>
+      <div class="modal-header bg-success text-white py-2">
+        <h5 class="modal-title fw-bold"><i class="fa-solid fa-cash-register me-2"></i>Process Payment</h5>
         <button class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
-      <div class="modal-body">
-        <p class="small text-muted mb-3">
-          Enter your username and registered recovery email address to set a new password.
-        </p>
-        <div id="resetPwAlert" class="alert d-none"></div>
-        <form onsubmit="submitForgotPassword(event)">
-          <div class="mb-2">
-            <label class="form-label small fw-semibold">Username</label>
-            <input type="text" class="form-control" id="fpUsername" required placeholder="Enter your username">
-          </div>
-          <div class="mb-2">
-            <label class="form-label small fw-semibold">Recovery Email</label>
-            <input type="email" class="form-control" id="fpEmail" required placeholder="Enter your registered email">
-          </div>
-          <div class="mb-2">
-            <label class="form-label small fw-semibold">New Password (min 6 characters)</label>
-            <input type="password" class="form-control" id="fpNewPassword" minlength="6" required placeholder="New password">
-          </div>
-          <div class="mb-3">
-            <label class="form-label small fw-semibold">Confirm New Password</label>
-            <input type="password" class="form-control" id="fpConfirmPassword" minlength="6" required placeholder="Confirm new password">
-          </div>
-          <button type="submit" id="btnFpSubmit" class="btn btn-warning w-100 fw-bold py-2">
-            <i class="fa-solid fa-rotate me-1"></i>Reset Password
-          </button>
-        </form>
-      </div>
-    </div>
-  </div>
-</div>
+      <div class="modal-body p-3">
+        <input type="hidden" id="payOrderId">
 
-<!-- SUPABASE CONNECTION SETUP MODAL -->
-<div class="modal fade" id="dbConfigModal" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header bg-dark text-white">
-        <h5 class="modal-title"><i class="fa-solid fa-database text-warning me-2"></i>Supabase Connection Setup</h5>
-        <button class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <p class="small text-muted mb-3">
-          Credentials are stored locally on this browser only (or loaded from a git-ignored <code>config.js</code>) so no keys are committed to GitHub.
-        </p>
-        <div class="mb-3">
-          <label class="form-label small fw-semibold">Supabase Project URL</label>
-          <input type="url" class="form-control" id="cfgSbUrlInput" placeholder="https://your-project.supabase.co">
-        </div>
-        <div class="mb-3">
-          <label class="form-label small fw-semibold">Supabase Anon Public Key</label>
-          <input type="password" class="form-control" id="cfgSbKeyInput" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6...">
-        </div>
-        <div class="d-flex gap-2">
-          <button type="button" class="btn btn-warning fw-bold flex-grow-1" onclick="saveDbConfig()">
-            <i class="fa-solid fa-floppy-disk me-1"></i>Save Connection
-          </button>
-          <button type="button" class="btn btn-outline-danger" onclick="clearDbConfig()" title="Clear saved browser credentials">
-            <i class="fa-solid fa-trash"></i>
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ORDER MODAL -->
-<div class="modal fade" id="orderModal" tabindex="-1">
-  <div class="modal-dialog modal-xl modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header bg-dark text-white">
-        <h5 class="modal-title"><i class="fa-solid fa-cart-plus me-2"></i>New Order</h5>
-        <button class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div class="row g-3">
-          <div class="col-md-7 border-end">
-            <div class="d-flex gap-1 overflow-x-auto pb-2 mb-2 category-tabs-container" id="posCategoryTabs"></div>
-            <input class="form-control form-control-sm mb-2" id="menuSearch" placeholder="Search menu…" oninput="onMenuSearch()">
-            <div class="row g-2" id="posMenuGrid" style="max-height:450px; overflow-y:auto; -webkit-overflow-scrolling: touch;"></div>
-          </div>
+        <!-- TOP QUICK SUMMARY BANNER -->
+        <div class="row g-2 align-items-center bg-dark text-white rounded-3 p-2 mb-3 mx-0">
           <div class="col-md-5">
-            <h5>Basket</h5>
-            <select class="form-select form-select-sm mb-2" id="cartTableSelect"></select>
-            <div id="cartItemsList" class="my-2" style="max-height:280px; overflow-y:auto; -webkit-overflow-scrolling: touch;"></div>
-            <div class="border-top pt-2">
-              <div class="d-flex justify-content-between fs-5 text-danger fw-bold">
-                <span>Subtotal:</span>
-                <strong id="cartSubtotal">₱0.00</strong>
+            <label class="form-label small text-warning fw-semibold mb-1"><i class="fa-solid fa-user me-1"></i>Customer Name (Optional)</label>
+            <input class="form-control form-control-sm" id="payCustomerName" placeholder="Walk-In Customer">
+          </div>
+          <div class="col-6 col-md-4 text-md-end">
+            <div class="small text-uppercase text-secondary fw-semibold">Grand Total Due</div>
+            <div class="fs-3 fw-bold text-warning lh-1" id="payTopBannerDue">₱0.00</div>
+          </div>
+          <div class="col-6 col-md-3 text-end">
+            <div class="small text-uppercase text-secondary fw-semibold">Change Due</div>
+            <div class="fs-3 fw-bold text-info lh-1" id="payTopBannerChange">₱0.00</div>
+          </div>
+        </div>
+
+        <div class="row g-3">
+          <!-- LEFT COLUMN: DISCOUNTS & BILL SUMMARY -->
+          <div class="col-lg-5 border-end pe-lg-3">
+            <div class="card bg-light border p-2 mb-2">
+              <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" id="paySeniorPwdToggle" onchange="togglePaySeniorPwdUI()">
+                <label class="form-check-label fw-bold small text-primary" for="paySeniorPwdToggle">
+                  <i class="fa-solid fa-id-card me-1"></i>Senior Citizen / PWD (<span id="paySeniorPctLabel">20</span>% Off + VAT-Exempt)
+                </label>
+              </div>
+              <div id="paySeniorPwdFields" class="d-none mt-2">
+                <input class="form-control form-control-sm" id="paySeniorPwdIdInput" placeholder="Enter Senior Citizen / PWD ID #" oninput="recalcPaymentSummary()">
+                <div class="form-text text-muted" style="font-size:0.72rem;">Applies <span id="paySeniorPctHelp">20</span>% discount &amp; removes VAT.</div>
               </div>
             </div>
-            <button class="btn btn-warning w-100 fw-bold mt-3 py-2" onclick="submitOrder()">Submit Order</button>
+
+            <div class="row g-2 mb-2" id="payManualDiscountGroup">
+              <div class="col-5">
+                <label class="form-label small fw-semibold mb-1">Discount (%)</label>
+                <input type="number" step="0.1" min="0" max="50" class="form-control form-control-sm" id="payDiscount" value="0" placeholder="0" oninput="recalcPaymentSummary()">
+              </div>
+              <div class="col-7">
+                <label class="form-label small fw-semibold mb-1">Discount Reason</label>
+                <input class="form-control form-control-sm" id="payDiscountReason" placeholder="Promo / Voucher / Reason">
+              </div>
+            </div>
+
+            <div class="border rounded-3 p-3 bg-light">
+              <div class="small fw-bold text-uppercase text-muted mb-2 border-bottom pb-1">Bill Breakdown</div>
+              <div class="d-flex justify-content-between small mb-1"><span>Subtotal:</span><strong id="paySubtotalDisplay">₱0.00</strong></div>
+              <div class="d-flex justify-content-between small mb-1 d-none" id="payLessVatRowDisplay"><span>Less: VAT-Exempt (<span id="payLessVatPct">12</span>%):</span><span id="payLessVatDisplay" class="text-danger">-₱0.00</span></div>
+              <div class="d-flex justify-content-between small mb-1"><span>Discount:</span><span id="payDiscountAmtDisplay" class="text-danger">-₱0.00</span></div>
+              <div class="d-flex justify-content-between small mb-1" id="payTaxRowDisplay"><span>Tax / VAT:</span><span id="payTaxDisplay" class="fw-semibold">₱0.00</span></div>
+              <div class="d-flex justify-content-between small mb-1" id="payServiceRowDisplay"><span>Service Charge:</span><span id="payServiceDisplay" class="fw-semibold">₱0.00</span></div>
+              <hr class="my-2">
+              <div class="d-flex justify-content-between fs-5 fw-bold text-danger"><span>Total Payable:</span><strong id="payGrandTotalDisplay">₱0.00</strong></div>
+              <div id="payVatInfoDisplay" class="small text-muted border-top mt-2 pt-2 d-none"></div>
+            </div>
           </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
 
-<!-- TRANSFER TABLE MODAL -->
-<div class="modal fade" id="transferTableModal" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header bg-primary text-white">
-        <h5 class="modal-title"><i class="fa-solid fa-arrows-rotate me-2"></i>Transfer Table / Reassign</h5>
-        <button class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <input type="hidden" id="transferOrderId">
-        <div class="alert alert-light border mb-3">
-          <div class="small text-muted">Order Number:</div>
-          <strong id="transferOrderNum" class="text-primary fs-5">—</strong>
-          <div class="small text-muted mt-1">Current Table: <strong id="transferCurrentTable" class="text-dark">—</strong></div>
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Select Target Table (Available Only)</label>
-          <select class="form-select" id="transferTargetTableSelect"></select>
-        </div>
-        <button class="btn btn-primary w-100 fw-bold py-2" onclick="submitTableTransfer()">
-          <i class="fa-solid fa-check me-1"></i>Confirm Table Transfer
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
+          <!-- RIGHT COLUMN: FAST PAYMENT ENTRY -->
+          <div class="col-lg-7 ps-lg-3">
+            <!-- PAYMENT TYPE MODE PILLS -->
+            <div class="btn-group w-100 mb-3" role="group" aria-label="Payment Mode">
+              <button type="button" class="btn btn-outline-success fw-bold active" id="btnPayModeSingle" onclick="setPaymentMode('single')">
+                <i class="fa-solid fa-wallet me-1"></i>Single Payment
+              </button>
+              <button type="button" class="btn btn-outline-success fw-bold" id="btnPayModeHybrid" onclick="setPaymentMode('hybrid')">
+                <i class="fa-solid fa-code-branch me-1"></i>Hybrid Split
+              </button>
+              <button type="button" class="btn btn-outline-primary fw-bold" id="btnPayModeDelivery" onclick="setPaymentMode('delivery')">
+                <i class="fa-solid fa-motorcycle me-1"></i>Delivery
+              </button>
+            </div>
 
-<!-- MERGE TABLES MODAL -->
-<div class="modal fade" id="mergeTablesModal" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header bg-dark text-white">
-        <h5 class="modal-title"><i class="fa-solid fa-object-group me-2"></i>Merge Active Tables</h5>
-        <button class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Source Table (Table to move FROM)</label>
-          <select class="form-select" id="mergeSourceTableSelect" onchange="onMergeSourceTableChange()"></select>
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Target Table (Table to combine INTO)</label>
-          <select class="form-select" id="mergeTargetTableSelect"></select>
-        </div>
-        <div class="alert alert-warning small mb-3">
-          <i class="fa-solid fa-triangle-exclamation me-1"></i>
-          All items from the source table will be appended to the target table order, and the source table will be freed.
-        </div>
-        <button class="btn btn-warning w-100 fw-bold py-2" onclick="submitTableMerge()">
-          <i class="fa-solid fa-code-merge me-1"></i>Confirm &amp; Merge Orders
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
+            <!-- HIDDEN COMPATIBILITY CHECKBOXES -->
+            <input type="checkbox" class="d-none" id="payHybridToggle" onchange="toggleHybridPaymentUI()">
+            <input type="checkbox" class="d-none" id="payDeliveryToggle" onchange="togglePayDeliveryUI()">
+            <input type="hidden" id="payDue">
 
-<!-- RESERVATION MODAL -->
-<div class="modal fade" id="reservationModal" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header text-white" style="background-color: #6f42c1;">
-        <h5 class="modal-title"><i class="fa-solid fa-bookmark me-2"></i>Table Reservation</h5>
-        <button class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <input type="hidden" id="resTableId">
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Table</label>
-          <input class="form-control" id="resTableNumber" readonly>
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-semibold">Reservation Note / Customer Name (Optional)</label>
-          <input class="form-control" id="resCustomerNote" placeholder="e.g. Reserved for Mr. Smith at 7 PM">
-        </div>
-        <div class="d-flex gap-2">
-          <button class="btn text-white w-100 fw-bold py-2" style="background-color: #6f42c1;" onclick="submitReservation(true)">
-            <i class="fa-solid fa-bookmark me-1"></i>Mark Reserved
-          </button>
-          <button class="btn btn-outline-secondary w-100 fw-bold py-2" id="btnUnreserve" onclick="submitReservation(false)">
-            <i class="fa-solid fa-ban me-1"></i>Clear Reservation
-          </button>
-        </div>
-        <div id="resTransferBox" class="border-top mt-3 pt-3 d-none">
-          <label class="form-label fw-semibold">Transfer Reservation To (Available Tables)</label>
-          <div class="input-group">
-            <select class="form-select" id="resTransferSelect"></select>
-            <button class="btn btn-outline-primary fw-bold" onclick="submitReservationTransfer()">
-              <i class="fa-solid fa-arrows-rotate me-1"></i>Transfer
+            <!-- DELIVERY PLATFORM SELECTOR -->
+            <div id="payDeliveryFields" class="card bg-light border-primary p-2 mb-3 d-none">
+              <label class="form-label fw-bold small text-primary mb-1"><i class="fa-solid fa-motorcycle me-1"></i>Select Delivery Platform</label>
+              <div class="d-flex flex-wrap gap-1 mb-2">
+                <button type="button" class="btn btn-sm btn-outline-primary fw-semibold delivery-pill active" data-platform="Food Panda" onclick="selectDeliveryPlatform('Food Panda')">Food Panda</button>
+                <button type="button" class="btn btn-sm btn-outline-primary fw-semibold delivery-pill" data-platform="GrabFood" onclick="selectDeliveryPlatform('GrabFood')">GrabFood</button>
+                <button type="button" class="btn btn-sm btn-outline-primary fw-semibold delivery-pill" data-platform="Maxim" onclick="selectDeliveryPlatform('Maxim')">Maxim</button>
+                <button type="button" class="btn btn-sm btn-outline-primary fw-semibold delivery-pill" data-platform="Others" onclick="selectDeliveryPlatform('Others')">Others</button>
+              </div>
+              <select class="form-select form-select-sm d-none" id="payDeliveryPlatform" onchange="onDeliveryPlatformChange()">
+                <option value="Food Panda">Food Panda</option>
+                <option value="GrabFood">GrabFood</option>
+                <option value="Maxim">Maxim</option>
+                <option value="Others">Others</option>
+              </select>
+              <input class="form-control form-control-sm mt-1 d-none" id="payDeliveryOther" placeholder="Enter delivery platform name">
+              <div class="form-text text-muted" style="font-size:0.75rem;">Enter the delivery booking/order # in Reference # below.</div>
+            </div>
+
+            <!-- SINGLE PAYMENT FIELDS -->
+            <div id="singlePaymentFields">
+              <div id="singleMethodPickerWrap" class="mb-3">
+                <label class="form-label fw-semibold small mb-1">1. Select Payment Method</label>
+                <div class="d-flex flex-wrap gap-1">
+                  <button type="button" class="btn btn-sm btn-outline-dark fw-bold flex-fill pay-method-pill active" data-method="Cash" onclick="selectSinglePayMethod('Cash')"><i class="fa-solid fa-money-bill-wave me-1"></i>Cash</button>
+                  <button type="button" class="btn btn-sm btn-outline-dark fw-bold flex-fill pay-method-pill" data-method="GCash" onclick="selectSinglePayMethod('GCash')"><i class="fa-solid fa-mobile-screen me-1"></i>GCash</button>
+                  <button type="button" class="btn btn-sm btn-outline-dark fw-bold flex-fill pay-method-pill" data-method="PayMaya" onclick="selectSinglePayMethod('PayMaya')"><i class="fa-solid fa-wallet me-1"></i>Maya</button>
+                  <button type="button" class="btn btn-sm btn-outline-dark fw-bold flex-fill pay-method-pill" data-method="Card" onclick="selectSinglePayMethod('Card')"><i class="fa-solid fa-credit-card me-1"></i>Card</button>
+                  <button type="button" class="btn btn-sm btn-outline-dark fw-bold flex-fill pay-method-pill" data-method="Other" onclick="selectSinglePayMethod('Other')">Other</button>
+                </div>
+                <select class="form-select d-none" id="payMethod" onchange="onPaymentMethodChange()">
+                  <option value="Cash">Cash</option>
+                  <option value="Card">Card</option>
+                  <option value="GCash">GCash</option>
+                  <option value="PayMaya">PayMaya</option>
+                  <option value="Other">Other</option>
+                </select>
+                <input class="form-control form-control-sm mt-2 d-none" id="payMethodOther" placeholder="Enter payment method name (e.g. Bank Transfer, Voucher)">
+              </div>
+
+              <div class="mb-2">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <label class="form-label fw-semibold small mb-0">2. Amount Received</label>
+                  <div class="d-flex flex-wrap gap-1">
+                    <button type="button" class="btn btn-xs btn-warning fw-bold py-0 px-2" style="font-size:0.75rem;" onclick="applyQuickCash('exact')">Exact</button>
+                    <button type="button" class="btn btn-xs btn-outline-secondary fw-semibold py-0 px-2" style="font-size:0.75rem;" onclick="applyQuickCash(100)">₱100</button>
+                    <button type="button" class="btn btn-xs btn-outline-secondary fw-semibold py-0 px-2" style="font-size:0.75rem;" onclick="applyQuickCash(200)">₱200</button>
+                    <button type="button" class="btn btn-xs btn-outline-secondary fw-semibold py-0 px-2" style="font-size:0.75rem;" onclick="applyQuickCash(500)">₱500</button>
+                    <button type="button" class="btn btn-xs btn-outline-secondary fw-semibold py-0 px-2" style="font-size:0.75rem;" onclick="applyQuickCash(1000)">₱1,000</button>
+                    <button type="button" class="btn btn-xs btn-outline-secondary fw-semibold py-0 px-2" style="font-size:0.75rem;" onclick="applyQuickCash(2000)">₱2,000</button>
+                  </div>
+                </div>
+                <input type="number" step="0.01" class="form-control form-control-lg fw-bold text-success" id="payReceived" placeholder="0.00" oninput="calcChange()">
+              </div>
+
+              <div class="row g-2 mb-3">
+                <div class="col-5">
+                  <label class="form-label fw-semibold small mb-1">Change</label>
+                  <input class="form-control fw-bold bg-light text-primary" id="payChange" readonly placeholder="0.00">
+                </div>
+                <div class="col-7">
+                  <label class="form-label fw-semibold small mb-1">Reference # (Optional)</label>
+                  <input class="form-control" id="payRef" placeholder="GCash / Card / Delivery #">
+                </div>
+              </div>
+            </div>
+
+            <!-- HYBRID PAYMENT FIELDS -->
+            <div id="hybridPaymentFields" class="d-none border rounded-3 p-3 bg-light mb-3">
+              <div class="mb-2">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                  <label class="form-label fw-semibold small mb-0">1. Cash Tendered Amount</label>
+                  <div class="d-flex gap-1">
+                    <button type="button" class="btn btn-outline-secondary fw-semibold py-0 px-2" style="font-size:0.72rem;" onclick="applyHybridQuickCash(100)">₱100</button>
+                    <button type="button" class="btn btn-outline-secondary fw-semibold py-0 px-2" style="font-size:0.72rem;" onclick="applyHybridQuickCash(500)">₱500</button>
+                    <button type="button" class="btn btn-outline-secondary fw-semibold py-0 px-2" style="font-size:0.72rem;" onclick="applyHybridQuickCash(1000)">₱1,000</button>
+                  </div>
+                </div>
+                <input type="number" step="0.01" min="0" class="form-control fw-bold text-success" id="payHybridCash" placeholder="0.00" oninput="onHybridAmountInput('cash')">
+              </div>
+              <div class="row g-2 mb-2">
+                <div class="col-6">
+                  <label class="form-label fw-semibold small mb-1">2. Second Method</label>
+                  <select class="form-select form-select-sm" id="payHybridMethod" onchange="onHybridMethodChange()">
+                    <option value="GCash">GCash</option>
+                    <option value="PayMaya">Maya (PayMaya)</option>
+                    <option value="Card">Card</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div class="col-6">
+                  <div class="d-flex justify-content-between align-items-center mb-1">
+                    <label class="form-label fw-semibold small mb-0">Second Amount</label>
+                    <button type="button" class="btn btn-warning fw-bold py-0 px-1" style="font-size:0.68rem;" onclick="fillHybridRemaining()">Balance</button>
+                  </div>
+                  <input type="number" step="0.01" min="0" class="form-control form-control-sm fw-bold text-primary" id="payHybridSecondAmt" placeholder="0.00" oninput="onHybridAmountInput('second')">
+                </div>
+              </div>
+              <input class="form-control form-control-sm mb-2 d-none" id="payHybridMethodOther" placeholder="Enter second payment method name">
+              <div class="mb-2">
+                <label class="form-label fw-semibold small mb-1">Reference # (GCash / Maya / Card Trace #)</label>
+                <input class="form-control form-control-sm" id="payHybridRef" placeholder="e.g. Ref # 123456789">
+              </div>
+              <div class="d-flex justify-content-between small border-top pt-2">
+                <span>Total Combined Paid:</span>
+                <strong id="payHybridTotalPaid" class="text-dark">₱0.00</strong>
+              </div>
+              <div class="d-flex justify-content-between small">
+                <span>Cash Change:</span>
+                <strong id="payHybridChange" class="text-success">₱0.00</strong>
+              </div>
+            </div>
+
+            <button class="btn btn-success w-100 fw-bold py-3 fs-5 shadow" id="btnConfirmPaymentSubmit" onclick="submitPayment()">
+              <i class="fa-solid fa-check-circle me-2"></i>Confirm &amp; Complete Payment
             </button>
           </div>
         </div>
@@ -2426,13 +2427,43 @@ async function callServer(fnName, ...args) {
         }));
 
       const paymentMap = {};
+      const addSalesPaymentSplit = (methodLabel, amount) => {
+        const amt = Number(amount || 0);
+        if (amt <= 0) return;
+        const key = String(methodLabel || 'Cash').trim();
+        if (!paymentMap[key]) paymentMap[key] = { method: key, orders: 0, sales: 0 };
+        paymentMap[key].orders++;
+        paymentMap[key].sales += amt;
+      };
+
       paid.forEach(o => {
-        const label = o.PaymentMethod === 'Delivery' && o.DeliveryPlatform
-          ? `Delivery (${o.DeliveryPlatform})`
-          : (o.PaymentMethod || 'Cash');
-        if (!paymentMap[label]) paymentMap[label] = { method: label, orders: 0, sales: 0 };
-        paymentMap[label].orders++;
-        paymentMap[label].sales += Number(o.GrandTotal || 0);
+        const pm = String(o.PaymentMethod || 'Cash').trim();
+        const grandTotal = Number(o.GrandTotal || 0);
+        const changeAmt = Number(o.ChangeAmount || 0);
+
+        if (pm.startsWith('Hybrid (')) {
+          const refStr = String(o.ReferenceNumber || '');
+          const mCash = refStr.match(/Cash:\s*([0-9.]+)/i);
+          const hybridInner = pm.match(/^Hybrid\s*\(\s*Cash\s*\+\s*([^)]+)\)/i);
+          const secondName = hybridInner ? hybridInner[1].trim() : 'E-Wallet / Card';
+
+          const escapedSecond = secondName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const mSecond = refStr.match(new RegExp(`${escapedSecond}:\\s*([0-9.]+)`, 'i'));
+
+          const rawCash = mCash ? parseFloat(mCash[1]) : 0;
+          const netCash = Math.max(0, rawCash - changeAmt);
+          const secondAmt = mSecond
+            ? parseFloat(mSecond[1])
+            : Math.max(0, grandTotal - netCash);
+
+          if (netCash > 0) addSalesPaymentSplit('Cash', netCash);
+          if (secondAmt > 0) addSalesPaymentSplit(secondName, secondAmt);
+        } else {
+          const label = pm === 'Delivery' && o.DeliveryPlatform
+            ? `Delivery (${o.DeliveryPlatform})`
+            : pm;
+          addSalesPaymentSplit(label, grandTotal);
+        }
       });
       const paymentBreakdown = Object.values(paymentMap)
         .sort((a, b) => b.sales - a.sales)
@@ -2441,7 +2472,16 @@ async function callServer(fnName, ...args) {
           share: totalSales ? ((p.sales / totalSales) * 100).toFixed(1) : '0.0'
         }));
 
+      const categoryByItemId = {};
+      const categoryByItemName = {};
+      (state.menu || []).forEach(m => {
+        if (m.MenuItemID) categoryByItemId[String(m.MenuItemID)] = m.Category || 'General';
+        if (m.ItemID) categoryByItemId[String(m.ItemID)] = m.Category || 'General';
+        if (m.ItemName) categoryByItemName[String(m.ItemName).trim().toLowerCase()] = m.Category || 'General';
+      });
+
       const topMap = {};
+      const catMap = {};
       items.forEach(i => {
         const name = i.ItemNameSnapshot || i.ItemName;
         const qty = Number(i.Quantity || i.Qty || 0);
@@ -2449,11 +2489,62 @@ async function callServer(fnName, ...args) {
         if (!topMap[name]) topMap[name] = { name, quantity: 0, sales: 0 };
         topMap[name].quantity += qty;
         topMap[name].sales += line;
+
+        const catName = categoryByItemId[String(i.ItemID || i.MenuItemID || '')]
+          || categoryByItemName[String(name || '').trim().toLowerCase()]
+          || 'General';
+        if (!catMap[catName]) catMap[catName] = { category: catName, quantity: 0, sales: 0 };
+        catMap[catName].quantity += qty;
+        catMap[catName].sales += line;
       });
       const topItems = Object.values(topMap).sort((a, b) => b.sales - a.sales).map(x => ({
         ...x,
         avgPrice: x.quantity ? x.sales / x.quantity : 0,
         share: totalSub ? ((x.sales / totalSub) * 100).toFixed(1) : '0.0'
+      }));
+      const categoryBreakdown = Object.values(catMap).sort((a, b) => b.sales - a.sales).map(cItem => ({
+        ...cItem,
+        share: totalSub ? ((cItem.sales / totalSub) * 100).toFixed(1) : '0.0'
+      }));
+
+      const serverMap = {};
+      const hourlyMap = {};
+      const orderTypeMap = {};
+      paid.forEach(o => {
+        const srvName = (o.WaiterName || o.CounterName || 'Unassigned').trim();
+        if (!serverMap[srvName]) serverMap[srvName] = { server: srvName, orders: 0, sales: 0 };
+        serverMap[srvName].orders++;
+        serverMap[srvName].sales += Number(o.GrandTotal || 0);
+
+        const oType = o.PaymentMethod === 'Delivery'
+          ? 'Delivery'
+          : (o.OrderType || (o.TableID ? 'Dine-In' : 'Takeout'));
+        if (!orderTypeMap[oType]) orderTypeMap[oType] = { type: oType, orders: 0, sales: 0 };
+        orderTypeMap[oType].orders++;
+        orderTypeMap[oType].sales += Number(o.GrandTotal || 0);
+
+        const dt = new Date(o.PaidAt || o.CreatedAt);
+        if (!isNaN(dt.getTime())) {
+          const hr = dt.getHours();
+          const hrLabel = `${String(hr).padStart(2, '0')}:00 - ${String(hr).padStart(2, '0')}:59`;
+          if (!hourlyMap[hr]) hourlyMap[hr] = { hour: hr, label: hrLabel, orders: 0, sales: 0 };
+          hourlyMap[hr].orders++;
+          hourlyMap[hr].sales += Number(o.GrandTotal || 0);
+        }
+      });
+
+      const serverBreakdown = Object.values(serverMap).sort((a, b) => b.sales - a.sales).map(s => ({
+        ...s,
+        avgOrder: s.orders ? s.sales / s.orders : 0,
+        share: totalSales ? ((s.sales / totalSales) * 100).toFixed(1) : '0.0'
+      }));
+      const orderTypeBreakdown = Object.values(orderTypeMap).sort((a, b) => b.sales - a.sales).map(t => ({
+        ...t,
+        share: totalSales ? ((t.sales / totalSales) * 100).toFixed(1) : '0.0'
+      }));
+      const hourlyBreakdown = Object.values(hourlyMap).sort((a, b) => a.hour - b.hour).map(h => ({
+        ...h,
+        share: totalSales ? ((h.sales / totalSales) * 100).toFixed(1) : '0.0'
       }));
 
       const dailyMap = {};
@@ -2498,6 +2589,10 @@ async function callServer(fnName, ...args) {
         averageOrderValue: paid.length ? totalSales / paid.length : 0,
         branchBreakdown,
         paymentBreakdown,
+        categoryBreakdown,
+        serverBreakdown,
+        orderTypeBreakdown,
+        hourlyBreakdown,
         topItems,
         daily: Object.values(dailyMap).sort((a, b) => b.date.localeCompare(a.date)),
         orders: orderRows,
@@ -2569,8 +2664,7 @@ async function callServer(fnName, ...args) {
 
       const totalRefunded = refundLogs.reduce((s, r) => s + Number(r.amount || 0), 0);
 
-      // Full Transaction Log (all branch orders + branch activity logs for the date)
-      const branchOrderIds = new Set(orders.map(o => o.OrderID));
+      // Full Transaction Log (all branch orders for the date)
       const transactionLogs = orders.map(o => {
         const dt = new Date(o.PaidAt || o.CreatedAt);
         const pm = o.PaymentMethod === 'Delivery' && o.DeliveryPlatform
@@ -2589,16 +2683,6 @@ async function callServer(fnName, ...args) {
           note: o.DiscountReason || ''
         };
       });
-
-      const activityEvents = (actLogs || [])
-        .filter(l => !l.EntityID || l.EntityType !== 'Order' || branchOrderIds.has(l.EntityID))
-        .map(l => ({
-          time: new Date(l.Timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          user: userNameMap[l.UserID] || l.UserID || 'System',
-          action: l.Action,
-          entity: l.EntityType || '',
-          details: l.NewValue || ''
-        }));
 
       const totalSales = paid.reduce((s, o) => s + Number(o.GrandTotal || 0), 0);
       const totalCollected = paid.reduce((s, o) => s + Number(o.AmountTendered || o.GrandTotal || 0), 0);
@@ -2719,8 +2803,7 @@ async function callServer(fnName, ...args) {
         totalChange,
         itemsSold: Object.values(itemMap).sort((a, b) => b.quantity - a.quantity),
         refundLogs,
-        transactionLogs,
-        activityEvents
+        transactionLogs
       };
     }
     case 'getEodHistory': {
@@ -2732,6 +2815,21 @@ async function callServer(fnName, ...args) {
         .limit(30);
       if (error) throw new Error(error.message);
       return data || [];
+    }
+    case 'deleteEodReport': {
+      const [, reportId] = args;
+      if (!isGlobalAdmin()) {
+        throw new Error('Only Admin users can delete Z-Reading closing records.');
+      }
+      if (!reportId) throw new Error('Invalid Z-Reading report ID.');
+      const { error } = await sbClient
+        .from('eod_reports')
+        .delete()
+        .eq('ReportID', reportId)
+        .eq('BranchID', bId);
+      if (error) throw new Error(error.message);
+      await logActivity('DELETE_EOD_REPORT', 'EOD', reportId, 'Deleted Z-Reading closing record');
+      return { success: true, message: 'Z-Reading closing deleted.' };
     }
     case 'archiveAndResetPOS': {
       const [, dateVal] = args;
@@ -4267,6 +4365,65 @@ async function rejectCounter(orderId) {
 /* ============================================================
    PAYMENT MODAL & HYBRID PAYMENT LOGIC
    ============================================================ */
+function setPaymentMode(mode) {
+  const isHybrid = mode === 'hybrid';
+  const isDelivery = mode === 'delivery';
+
+  if ($('btnPayModeSingle')) $('btnPayModeSingle').classList.toggle('active', mode === 'single');
+  if ($('btnPayModeHybrid')) $('btnPayModeHybrid').classList.toggle('active', isHybrid);
+  if ($('btnPayModeDelivery')) $('btnPayModeDelivery').classList.toggle('active', isDelivery);
+
+  if ($('payHybridToggle')) $('payHybridToggle').checked = isHybrid;
+  if ($('payDeliveryToggle')) $('payDeliveryToggle').checked = isDelivery;
+
+  togglePayDeliveryUI();
+  toggleHybridPaymentUI();
+}
+
+function selectSinglePayMethod(method) {
+  if ($('payMethod')) $('payMethod').value = method;
+  document.querySelectorAll('.pay-method-pill').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.method === method);
+  });
+  onPaymentMethodChange();
+}
+
+function selectDeliveryPlatform(platform) {
+  if ($('payDeliveryPlatform')) $('payDeliveryPlatform').value = platform;
+  document.querySelectorAll('.delivery-pill').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.platform === platform);
+  });
+  onDeliveryPlatformChange();
+}
+
+function applyQuickCash(val) {
+  const due = parseFloat($('payDue')?.value) || 0;
+  const amt = val === 'exact' ? due : Number(val);
+  if ($('payReceived')) {
+    $('payReceived').value = amt.toFixed(2);
+    calcChange();
+  }
+}
+
+function applyHybridQuickCash(val) {
+  const due = parseFloat($('payDue')?.value) || 0;
+  const amt = Math.min(due, Number(val));
+  if ($('payHybridCash')) {
+    $('payHybridCash').value = amt.toFixed(2);
+    onHybridAmountInput('cash');
+  }
+}
+
+function fillHybridRemaining() {
+  const due = parseFloat($('payDue')?.value) || 0;
+  const cash = Math.max(0, parseFloat($('payHybridCash')?.value) || 0);
+  const rem = Math.max(0, due - cash);
+  if ($('payHybridSecondAmt')) {
+    $('payHybridSecondAmt').value = rem.toFixed(2);
+    recalcHybridSummary();
+  }
+}
+
 function openPaymentModal(orderId) {
   const o = (state.orders || []).find(x => x.OrderID === orderId);
   $('payOrderId').value = orderId;
@@ -4277,14 +4434,13 @@ function openPaymentModal(orderId) {
   $('payDiscountReason').value = '';
   $('payReceived').value = '';
   $('payChange').value = '';
-  $('payMethod').value = 'Cash';
+  selectSinglePayMethod('Cash');
   if ($('payMethodOther')) {
     $('payMethodOther').value = '';
     $('payMethodOther').classList.add('d-none');
   }
   $('payRef').value = '';
 
-  if ($('payHybridToggle')) $('payHybridToggle').checked = false;
   if ($('payHybridCash')) $('payHybridCash').value = '';
   if ($('payHybridSecondAmt')) $('payHybridSecondAmt').value = '';
   if ($('payHybridMethod')) $('payHybridMethod').value = 'GCash';
@@ -4293,18 +4449,16 @@ function openPaymentModal(orderId) {
     $('payHybridMethodOther').classList.add('d-none');
   }
   if ($('payHybridRef')) $('payHybridRef').value = '';
-  toggleHybridPaymentUI();
 
-  if ($('payDeliveryToggle')) $('payDeliveryToggle').checked = false;
-  if ($('payDeliveryPlatform')) $('payDeliveryPlatform').value = 'Food Panda';
+  selectDeliveryPlatform('Food Panda');
   if ($('payDeliveryOther')) { $('payDeliveryOther').value = ''; $('payDeliveryOther').classList.add('d-none'); }
 
   const pct = getSeniorPct();
   $('paySeniorPctLabel').textContent = pct;
   $('paySeniorPctHelp').textContent = pct;
 
+  setPaymentMode('single');
   togglePaySeniorPwdUI();
-  togglePayDeliveryUI();
   showModal('paymentModal');
 }
 
@@ -4353,6 +4507,7 @@ function recalcHybridSummary() {
 
   if ($('payHybridTotalPaid')) $('payHybridTotalPaid').textContent = `${curr()}${totalPaid.toFixed(2)}`;
   if ($('payHybridChange')) $('payHybridChange').textContent = `${curr()}${cashChange.toFixed(2)}`;
+  if ($('payTopBannerChange')) $('payTopBannerChange').textContent = `${curr()}${cashChange.toFixed(2)}`;
 }
 
 function onPaymentMethodChange() {
@@ -4370,13 +4525,9 @@ function togglePayDeliveryUI() {
   const fields = $('payDeliveryFields');
   const methodSel = $('payMethod');
   const methodOther = $('payMethodOther');
-  const hybridCard = $('payHybridCard');
+  const singleMethodWrap = $('singleMethodPickerWrap');
   if (fields) fields.classList.toggle('d-none', !isDelivery);
-  if (hybridCard) hybridCard.classList.toggle('d-none', !!isDelivery);
-  if (isDelivery) {
-    if ($('payHybridToggle')) $('payHybridToggle').checked = false;
-    toggleHybridPaymentUI();
-  }
+  if (singleMethodWrap) singleMethodWrap.classList.toggle('d-none', !!isDelivery);
   if (methodSel) {
     methodSel.disabled = !!isDelivery;
     if (isDelivery) {
@@ -4479,12 +4630,21 @@ function recalcPaymentSummary() {
 
   const due = Math.max(0, t.total - Number(o.AmountPaid || 0));
   $('payDue').value = due.toFixed(2);
+  if ($('payTopBannerDue')) $('payTopBannerDue').textContent = `${curr()}${due.toFixed(2)}`;
   window._currentPaymentTotals = t;
   if ($('payHybridToggle')?.checked) {
     recalcHybridSummary();
   } else {
     calcChange();
   }
+}
+
+function calcChange() {
+  const due = parseFloat($('payDue').value) || 0, rec = parseFloat($('payReceived').value) || 0;
+  const chg = rec >= due ? (rec - due) : 0;
+  $('payChange').value = rec >= due ? chg.toFixed(2) : '';
+  if ($('payTopBannerChange')) $('payTopBannerChange').textContent = `${curr()}${chg.toFixed(2)}`;
+}
 }
 
 function calcChange() {
@@ -5473,12 +5633,14 @@ async function loadSalesReport() {
 
     $('reportSummary').innerHTML = `<div class="d-flex justify-content-between align-items-center mb-2"><span class="small text-muted">Period: <strong>${escapeHtml(rangeLabel)}</strong></span><span class="small text-muted">Paid: <strong>${r.counts.paid}</strong> • Open: <strong>${r.counts.open}</strong> • Cancelled/Void: <strong>${r.counts.cancelled}</strong> • Refunds/Edits: <strong class="text-danger">${r.counts.refunds || 0}</strong></span></div>
       <div class="row g-2">
-        <div class="col-6 col-md-2"><div class="stat-card bg-primary"><h6>Total Sales</h6><h4>${c}${r.totals.sales.toFixed(2)}</h4></div></div>
-        <div class="col-6 col-md-2"><div class="stat-card bg-success"><h6>Paid Orders</h6><h4>${r.counts.paid}</h4></div></div>
-        <div class="col-6 col-md-2"><div class="stat-card bg-warning"><h6>Avg Order</h6><h4>${c}${r.averageOrderValue.toFixed(2)}</h4></div></div>
-        <div class="col-6 col-md-2"><div class="stat-card bg-info"><h6>Items Sold</h6><h4>${r.totals.items}</h4></div></div>
-        <div class="col-6 col-md-2"><div class="stat-card bg-secondary"><h6>Discounts</h6><h4>${c}${r.totals.discount.toFixed(2)}</h4></div></div>
-        <div class="col-6 col-md-2"><div class="stat-card bg-danger"><h6>Refunds / Voids</h6><h4>${c}${Number(r.totals.refunded || 0).toFixed(2)}</h4></div></div>
+        <div class="col-6 col-md-3"><div class="stat-card bg-primary"><h6>Total Sales</h6><h4>${c}${r.totals.sales.toFixed(2)}</h4></div></div>
+        <div class="col-6 col-md-3"><div class="stat-card bg-success"><h6>Paid Orders</h6><h4>${r.counts.paid}</h4></div></div>
+        <div class="col-6 col-md-3"><div class="stat-card bg-warning"><h6>Avg Order Value</h6><h4>${c}${r.averageOrderValue.toFixed(2)}</h4></div></div>
+        <div class="col-6 col-md-3"><div class="stat-card bg-info"><h6>Items Sold</h6><h4>${r.totals.items}</h4></div></div>
+        <div class="col-6 col-md-3"><div class="stat-card bg-dark"><h6>VAT Collected</h6><h4>${c}${r.totals.tax.toFixed(2)}</h4></div></div>
+        <div class="col-6 col-md-3"><div class="stat-card bg-secondary"><h6>Service Charge</h6><h4>${c}${r.totals.service.toFixed(2)}</h4></div></div>
+        <div class="col-6 col-md-3"><div class="stat-card bg-secondary"><h6>Discounts Given</h6><h4>${c}${r.totals.discount.toFixed(2)}</h4></div></div>
+        <div class="col-6 col-md-3"><div class="stat-card bg-danger"><h6>Refunds / Voids</h6><h4>${c}${Number(r.totals.refunded || 0).toFixed(2)}</h4></div></div>
       </div>`;
 
     if (r.allBranches && r.branchBreakdown && r.branchBreakdown.length) {
@@ -5490,8 +5652,26 @@ async function loadSalesReport() {
       $('reportBranchComparison').innerHTML = '';
     }
 
-    $('reportPaymentMethods').innerHTML = r.paymentBreakdown.length
-      ? `<h6 class="mt-3 fw-bold">Sales by Payment Method</h6><div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr><th>Method</th><th class="text-end">Orders</th><th class="text-end">Total</th><th class="text-end">Share</th></tr></thead><tbody>${r.paymentBreakdown.map(p => `<tr><td>${escapeHtml(p.method)}</td><td class="text-end">${p.orders}</td><td class="text-end fw-semibold">${c}${p.sales.toFixed(2)}</td><td class="text-end">${p.share}%</td></tr>`).join('')}</tbody></table></div>` : '';
+    const paymentHtml = r.paymentBreakdown.length
+      ? `<h6 class="mt-3 fw-bold"><i class="fa-solid fa-wallet text-success me-1"></i>Sales by Payment Method (Hybrid Split Separated)</h6><div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr><th>Method</th><th class="text-end">Transactions</th><th class="text-end">Total</th><th class="text-end">Share</th></tr></thead><tbody>${r.paymentBreakdown.map(p => `<tr><td><strong>${escapeHtml(p.method)}</strong></td><td class="text-end">${p.orders}</td><td class="text-end fw-semibold">${c}${p.sales.toFixed(2)}</td><td class="text-end">${p.share}%</td></tr>`).join('')}</tbody></table></div>` : '';
+
+    const categoryHtml = (r.categoryBreakdown && r.categoryBreakdown.length)
+      ? `<h6 class="mt-3 fw-bold"><i class="fa-solid fa-layer-group text-primary me-1"></i>Sales by Category</h6><div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr><th>Category</th><th class="text-end">Items Qty</th><th class="text-end">Revenue</th><th class="text-end">Share</th></tr></thead><tbody>${r.categoryBreakdown.map(cat => `<tr><td><strong>${escapeHtml(cat.category)}</strong></td><td class="text-end">${cat.quantity}</td><td class="text-end fw-semibold">${c}${cat.sales.toFixed(2)}</td><td class="text-end">${cat.share}%</td></tr>`).join('')}</tbody></table></div>` : '';
+
+    const serverAndTypeHtml = `
+      <div class="row g-3">
+        <div class="col-md-7">
+          ${(r.serverBreakdown && r.serverBreakdown.length) ? `<h6 class="mt-2 fw-bold"><i class="fa-solid fa-user-tie text-warning me-1"></i>Staff / Server Performance</h6><div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr><th>Staff</th><th class="text-end">Orders</th><th class="text-end">Avg Ticket</th><th class="text-end">Sales</th><th class="text-end">Share</th></tr></thead><tbody>${r.serverBreakdown.map(s => `<tr><td>${escapeHtml(s.server)}</td><td class="text-end">${s.orders}</td><td class="text-end">${c}${s.avgOrder.toFixed(2)}</td><td class="text-end fw-semibold">${c}${s.sales.toFixed(2)}</td><td class="text-end">${s.share}%</td></tr>`).join('')}</tbody></table></div>` : ''}
+        </div>
+        <div class="col-md-5">
+          ${(r.orderTypeBreakdown && r.orderTypeBreakdown.length) ? `<h6 class="mt-2 fw-bold"><i class="fa-solid fa-utensils text-info me-1"></i>Sales by Order Channel</h6><div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr><th>Channel</th><th class="text-end">Orders</th><th class="text-end">Sales</th><th class="text-end">Share</th></tr></thead><tbody>${r.orderTypeBreakdown.map(t => `<tr><td>${escapeHtml(t.type)}</td><td class="text-end">${t.orders}</td><td class="text-end fw-semibold">${c}${t.sales.toFixed(2)}</td><td class="text-end">${t.share}%</td></tr>`).join('')}</tbody></table></div>` : ''}
+        </div>
+      </div>`;
+
+    const peakHoursHtml = (r.hourlyBreakdown && r.hourlyBreakdown.length)
+      ? `<h6 class="mt-3 fw-bold"><i class="fa-solid fa-clock text-danger me-1"></i>Hourly Sales Distribution (Peak Hours)</h6><div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr><th>Hour Window</th><th class="text-end">Orders</th><th class="text-end">Sales</th><th class="text-end">Share</th></tr></thead><tbody>${r.hourlyBreakdown.map(h => `<tr><td>${escapeHtml(h.label)}</td><td class="text-end">${h.orders}</td><td class="text-end fw-semibold">${c}${h.sales.toFixed(2)}</td><td class="text-end">${h.share}%</td></tr>`).join('')}</tbody></table></div>` : '';
+
+    $('reportPaymentMethods').innerHTML = paymentHtml + categoryHtml + serverAndTypeHtml + peakHoursHtml;
 
     $('reportTopItems').innerHTML = r.topItems.length
       ? `<div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr><th>#</th><th>Item</th><th class="text-end">Qty Sold</th><th class="text-end">Avg Price</th><th class="text-end">Revenue</th><th class="text-end">Share</th></tr></thead><tbody>${r.topItems.map((i, idx) => `<tr><td>${idx + 1}</td><td>${escapeHtml(i.name)}</td><td class="text-end">${i.quantity}</td><td class="text-end">${c}${i.avgPrice.toFixed(2)}</td><td class="text-end fw-semibold">${c}${i.sales.toFixed(2)}</td><td class="text-end">${i.share}%</td></tr>`).join('')}</tbody></table></div>` : '<p class="text-muted small">No item sales in this range.</p>';
@@ -5500,28 +5680,8 @@ async function loadSalesReport() {
       ? `<div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr><th>Date</th><th class="text-end">Orders</th><th class="text-end">Subtotal</th><th class="text-end">Discounts</th><th class="text-end">Tax</th><th class="text-end">Service</th><th class="text-end">Total Sales</th></tr></thead><tbody>${r.daily.map(d => `<tr><td>${escapeHtml(d.date)}</td><td class="text-end">${d.orders}</td><td class="text-end">${c}${d.subtotal.toFixed(2)}</td><td class="text-end">${c}${d.discount.toFixed(2)}</td><td class="text-end">${c}${d.tax.toFixed(2)}</td><td class="text-end">${c}${d.service.toFixed(2)}</td><td class="text-end fw-bold">${c}${d.sales.toFixed(2)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="text-muted small">No daily sales in this range.</p>';
 
     $('reportOrders').innerHTML = r.orders.length
-      ? `<div class="table-responsive"><table class="table table-sm table-bordered"><thead><tr><th>Date &amp; Time</th>${r.allBranches ? '<th>Branch</th>' : ''}<th>Order #</th><th>Table</th><th>Customer</th><th>Method</th><th class="text-end">Items</th><th class="text-end">Total</th><th>Notes</th></tr></thead><tbody>${r.orders.map(o => `<tr><td class="text-nowrap">${escapeHtml(o.date)} ${escapeHtml(o.time)}</td>${r.allBranches ? `<td class="small fw-semibold">${escapeHtml(o.branch)}</td>` : ''}<td><strong>${escapeHtml(o.orderNumber)}</strong></td><td>${escapeHtml(o.table)}</td><td>${escapeHtml(o.customer)}</td><td>${escapeHtml(o.method)}</td><td class="text-end">${o.itemQty}</td><td class="text-end fw-semibold">${c}${o.total.toFixed(2)}</td><td class="small text-muted">${escapeHtml(o.notes)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="text-muted small">No paid orders in this range.</p>';
-
-    $('reportRefunds').innerHTML = (r.refunds && r.refunds.length)
-      ? `<div class="table-responsive"><table class="table table-sm table-bordered border-danger">
-          <thead class="table-danger">
-            <tr>
-              <th>Date &amp; Time</th>
-              ${r.allBranches ? '<th>Branch</th>' : ''}
-              <th>Order #</th>
-              <th>Table</th>
-              <th>Type</th>
-              <th class="text-end">Refund / Void Amt</th>
-              <th>Items &amp; Reason</th>
-              <th>Processed By</th>
-            </tr>
-          </thead>
-          <tbody>${r.refunds.map(rf => `
-            <tr>
-              <td class="text-nowrap">${escapeHtml(rf.dateTime)}</td>
-              ${r.allBranches ? `<td class="small fw-semibold">${escapeHtml(rf.branch)}</td>` : ''}
-              <td><strong>${escapeHtml(rf.orderNumber)}</strong></td>
-              <td>${escapeHtml(rf.table)}</td>
+      ? `<div class="mb-2 d-flex justify-content-end"><input type="text" class="form-control form-control-sm" style="max-width:280px;" placeholder="Filter orders by #, table, customer, method…" oninput="filterReportOrderRows(this.value)"></div>
+         <div class="table-responsive"><table class="table table-sm table-bordered" id="reportOrdersTable"><thead><tr><th>Date &amp; Time</th>${r.allBranches ? '<th>Branch</th>' : ''}<th>Order #</th><th>Table</th><th>Customer</th><th>Method</th><th class="text-end">Items</th><th class="text-end">Total</th><th>Notes</th></tr></thead><tbody>${r.orders.map(o => `<tr><td class="text-nowrap">${escapeHtml(o.date)} ${escapeHtml(o.time)}</td>${r.allBranches ? `<td class="small fw-semibold">${escapeHtml(o.branch)}</td>` : ''}<td><strong>${escapeHtml(o.orderNumber)}</strong></td><td>${escapeHtml(o.table)}</td><td>${escapeHtml(o.customer)}</td><td>${escapeHtml(o.method)}</td><td class="text-end">${o.itemQty}</td><td class="text-end fw-semibold">${c}${o.total.toFixed(2)}</td><td class="small text-muted">${escapeHtml(o.notes)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="text-muted small">No paid orders in this range.</p>';
               <td><span class="badge bg-danger">${escapeHtml(String(rf.action).replace(/_/g, ' '))}</span></td>
               <td class="text-end fw-bold text-danger">-${c}${Number(rf.amount || 0).toFixed(2)}</td>
               <td class="small">${escapeHtml(rf.details)}</td>
@@ -5533,6 +5693,14 @@ async function loadSalesReport() {
 
     hideLoading();
   } catch (err) { hideLoading(); toast(err.message, 'danger'); }
+}
+
+function filterReportOrderRows(query) {
+  const q = String(query || '').toLowerCase().trim();
+  const rows = document.querySelectorAll('#reportOrdersTable tbody tr');
+  rows.forEach(tr => {
+    tr.style.display = !q || tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
 }
 
 function exportSalesReportCsv() {
@@ -5712,30 +5880,6 @@ function renderEODReportHtml(r) {
           </tbody>
         </table>
       </div>
-
-      ${(r.activityEvents && r.activityEvents.length) ? `
-      <h6 class="fw-bold border-bottom pb-1"><i class="fa-solid fa-shield-halved text-secondary me-1"></i>POS Audit Activity Log (${r.activityEvents.length} events)</h6>
-      <div class="table-responsive mb-0">
-        <table class="table table-sm table-bordered mb-0">
-          <thead class="table-light">
-            <tr>
-              <th>Time</th>
-              <th>User</th>
-              <th>Action</th>
-              <th>Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${r.activityEvents.map(ev => `
-              <tr>
-                <td class="text-nowrap">${escapeHtml(ev.time)}</td>
-                <td class="small fw-semibold">${escapeHtml(ev.user)}</td>
-                <td><span class="badge bg-light text-dark border">${escapeHtml(ev.action)}</span></td>
-                <td class="small text-muted">${escapeHtml(ev.details)}</td>
-              </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>` : ''}
     </div>`;
 }
 
@@ -5762,10 +5906,47 @@ async function loadEodHistory() {
   try {
     const rows = await callServer('getEodHistory', state.token);
     const c = curr();
+    const canDelete = isGlobalAdmin();
     if (!rows || !rows.length) {
-      tbody.innerHTML = '<tr><td colspan="7" class="text-muted small text-center py-2">No previous Z-Reading closings recorded for this branch.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" class="text-muted small text-center py-2">No previous Z-Reading closings recorded for this branch.</td></tr>';
       return;
     }
+    tbody.innerHTML = rows.map(row => {
+      const actionCell = canDelete
+        ? `<button type="button" class="btn btn-sm btn-outline-danger fw-bold" onclick="deleteEodClosing('${escapeHtml(row.ReportID)}', '${escapeHtml(row.BusinessDate)}')" title="Delete Z-Reading Closing"><i class="fa-solid fa-trash me-1"></i>Delete</button>`
+        : `<span class="badge bg-light text-muted border" title="Only Admin can delete"><i class="fa-solid fa-lock"></i></span>`;
+      return `
+      <tr>
+        <td><strong>${escapeHtml(row.BusinessDate)}</strong></td>
+        <td class="small text-muted">${row.ClosedAt ? new Date(row.ClosedAt).toLocaleString() : '—'}</td>
+        <td class="text-end fw-bold text-primary">${c}${Number(row.CashSales || 0).toFixed(2)}</td>
+        <td class="text-end text-danger">${c}${Number(row.SeniorPwdDiscounts || 0).toFixed(2)}</td>
+        <td class="text-end">${c}${Number(row.VatableSales || 0).toFixed(2)}</td>
+        <td class="text-end">${c}${Number(row.VatExemptSales || 0).toFixed(2)}</td>
+        <td class="text-end">${c}${Number(row.VatAmount || 0).toFixed(2)}</td>
+        <td class="text-end text-nowrap">${actionCell}</td>
+      </tr>`;
+    }).join('');
+  } catch (err) {}
+}
+
+async function deleteEodClosing(reportId, businessDate) {
+  if (!isGlobalAdmin()) {
+    return toast('Only Admin users can delete Z-Reading closing records.', 'warning');
+  }
+  if (!confirm(`Delete the Z-Reading closing record for ${businessDate}? This action cannot be undone.`)) return;
+  try {
+    showLoading(`Deleting Z-Reading for ${businessDate}…`);
+    const res = await callServer('deleteEodReport', state.token, reportId);
+    showDone(res.message || 'Z-Reading closing deleted!', async () => {
+      await loadEodHistory();
+      await loadAdminStats();
+    });
+  } catch (err) {
+    hideLoading();
+    toast(err.message, 'danger');
+  }
+}
     tbody.innerHTML = rows.map(row => `
       <tr>
         <td><strong>${escapeHtml(row.BusinessDate)}</strong></td>
